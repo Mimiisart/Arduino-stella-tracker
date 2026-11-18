@@ -1,8 +1,8 @@
 /**
- * MiniTag colour themes, each in a light and a dark variant. Burgundy light is
- * the original canvas design; the others follow the same recipe: a tinted
- * ground, a deep primary for hero cards and buttons, a soft tint for icon tiles
- * and chips, and a warm accent that pops on the primary.
+ * MiniTag colour themes, each in a light and a dark variant. The layout follows
+ * iOS (grouped lists, system font), but the colours keep MiniTag's warmth: a
+ * tinted ground, a deep primary for the ID card and filled buttons, a soft tint
+ * for icon tiles, and a warm cream accent (the Precision button, the card chip).
  *
  * `primary` is a FILL (always carries white text). Where the brand colour is
  * used as text or an icon on the page or a card, use `link` instead: in dark
