@@ -1,9 +1,10 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useEffect, type ReactNode } from 'react';
+import { Children, Fragment, isValidElement, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
   type StyleProp,
@@ -11,15 +12,6 @@ import {
   type ViewProps,
   type ViewStyle,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
 
 import type { BatteryLevel } from '@/ble/protocol';
 import { F, R } from '@/constants/minitag';
@@ -37,13 +29,14 @@ export function T({ variant = 'body', style, ...rest }: TextProps & { variant?: 
 }
 
 const text = StyleSheet.create({
-  display: { fontFamily: F.display, fontSize: 40, lineHeight: 42, letterSpacing: -1 },
-  title: { fontFamily: F.display, fontSize: 34, lineHeight: 37, letterSpacing: -0.9 },
-  body: { fontFamily: F.body, fontSize: 15, lineHeight: 22 },
-  bodyStrong: { fontFamily: F.bodySemibold, fontSize: 16, lineHeight: 21 },
-  small: { fontFamily: F.body, fontSize: 13, lineHeight: 18 },
-  label: { fontFamily: F.bodySemibold, fontSize: 13, lineHeight: 17 },
-  caption: { fontFamily: F.body, fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  // iOS text styles: Large Title, Title 2, Body, Headline, Subheadline, Footnote.
+  display: { ...F.display, fontSize: 34, lineHeight: 41 },
+  title: { ...F.display, fontSize: 28, lineHeight: 34 },
+  body: { ...F.body, fontSize: 17, lineHeight: 22 },
+  bodyStrong: { ...F.bodySemibold, fontSize: 17, lineHeight: 22 },
+  small: { ...F.body, fontSize: 15, lineHeight: 20 },
+  label: { ...F.bodySemibold, fontSize: 13, lineHeight: 18 },
+  caption: { ...F.body, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 });
 
 // ---- Icons -------------------------------------------------------------------
@@ -55,11 +48,13 @@ export function Icon({
   size = 22,
   color,
   weight = 'medium',
+  animationSpec,
 }: {
   name: IconName;
   size?: number;
   color?: string;
   weight?: SymbolViewProps['weight'];
+  animationSpec?: SymbolViewProps['animationSpec'];
 }) {
   const p = usePalette();
   return (
@@ -68,6 +63,7 @@ export function Icon({
       size={size}
       tintColor={color ?? p.ink}
       weight={weight}
+      animationSpec={animationSpec}
       style={{ width: size, height: size }}
       accessibilityElementsHidden
       importantForAccessibility="no"
@@ -75,26 +71,16 @@ export function Icon({
   );
 }
 
-/** Rounded soft square holding an icon, used at the start of list rows. */
-export function IconTile({ name, size = 40 }: { name: IconName; size?: number }) {
+/** Settings-style rounded square with a white symbol, at the start of list rows. */
+export function IconTile({ name, size = 30, color }: { name: IconName; size?: number; color?: string }) {
   const p = usePalette();
   return (
-    <View style={[shared.center, { width: size, height: size, borderRadius: R.iconTile, backgroundColor: p.primarySoft }]}>
-      <Icon name={name} size={size * 0.52} color={p.link} />
-    </View>
-  );
-}
-
-// ---- Brand -------------------------------------------------------------------
-
-export function Logo() {
-  const p = usePalette();
-  return (
-    <View style={shared.logoRow} accessible accessibilityRole="header" accessibilityLabel="MiniTag">
-      <View style={[shared.center, shared.logoMark, { backgroundColor: p.primary }]}>
-        <Icon name="dot.radiowaves.left.and.right" size={18} color={p.accent} weight="bold" />
-      </View>
-      <Text style={[shared.logoText, { color: p.ink }]}>MiniTag</Text>
+    <View
+      style={[
+        shared.center,
+        { width: size, height: size, borderRadius: size * 0.23, backgroundColor: color ?? p.primary },
+      ]}>
+      <Icon name={name} size={size * 0.6} color="#FFFFFF" />
     </View>
   );
 }
@@ -105,20 +91,9 @@ export function Card({ style, ...rest }: ViewProps) {
   const p = usePalette();
   return (
     <View
-      style={[{ backgroundColor: p.surface, borderWidth: 1, borderColor: p.border, borderRadius: R.card }, style]}
+      style={[{ backgroundColor: p.surface, borderRadius: R.card, borderCurve: 'continuous' }, style]}
       {...rest}
     />
-  );
-}
-
-export function Chip({ label, dot, tone = 'onPrimary' }: { label: string; dot: string; tone?: 'onPrimary' | 'soft' }) {
-  const p = usePalette();
-  const onPrimary = tone === 'onPrimary';
-  return (
-    <View style={[shared.chip, { backgroundColor: onPrimary ? p.primaryChip : p.primarySoft }]}>
-      <View style={[shared.chipDot, { backgroundColor: dot }]} />
-      <Text style={[shared.chipText, { color: onPrimary ? p.onPrimaryMuted : p.link }]}>{label}</Text>
-    </View>
   );
 }
 
@@ -128,16 +103,17 @@ type ButtonVariant = 'primary' | 'accent' | 'outline' | 'ghost' | 'remove';
 
 function buttonColors(p: Palette, v: ButtonVariant) {
   switch (v) {
+    // iOS button styles: filled, tinted (accent/outline), plain (ghost).
     case 'primary':
-      return { bg: p.primary, fg: p.onPrimary, border: p.primary, icon: p.accent };
+      return { bg: p.primary, fg: p.onPrimary, icon: p.onPrimary };
     case 'accent':
-      return { bg: p.accent, fg: p.onAccent, border: p.accent, icon: p.onAccent };
+      return { bg: p.accent, fg: p.onAccent, icon: p.onAccent };
     case 'outline':
-      return { bg: p.surface, fg: p.ink, border: p.border, icon: p.link };
+      return { bg: p.primarySoft, fg: p.link, icon: p.link };
     case 'ghost':
-      return { bg: 'transparent', fg: p.link, border: 'transparent', icon: p.link };
+      return { bg: 'transparent', fg: p.link, icon: p.link };
     case 'remove':
-      return { bg: p.surface, fg: p.garnet, border: p.removeBorder, icon: p.garnet };
+      return { bg: p.surface, fg: p.garnet, icon: p.garnet };
   }
 }
 
@@ -173,34 +149,20 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         shared.button,
-        compact && { minHeight: variant === 'ghost' ? 44 : 50 },
-        { backgroundColor: v.bg, borderColor: v.border, opacity: inactive ? 0.5 : 1 },
-        pressed && { transform: [{ scale: 0.98 }], opacity: 0.9 },
+        compact && { minHeight: 44 },
+        { backgroundColor: v.bg, opacity: inactive ? 0.4 : 1 },
+        pressed && { opacity: 0.6 },
         style,
       ]}>
       {loading ? (
         <ActivityIndicator color={v.fg} />
       ) : (
         <>
-          {icon && <Icon name={icon} size={21} color={v.icon} weight="semibold" />}
-          <Text style={[shared.buttonText, { color: v.fg }, compact && { fontSize: 16 }]}>{title}</Text>
+          {icon && <Icon name={icon} size={19} color={v.icon} weight="semibold" />}
+          <Text style={[shared.buttonText, { color: v.fg }, variant === 'ghost' && F.body]}>{title}</Text>
         </>
       )}
     </Pressable>
-  );
-}
-
-/** The greyed pill the design uses for an action that needs a connection. */
-export function UnavailableAction({ label }: { label: string }) {
-  const p = usePalette();
-  return (
-    <View
-      style={[shared.center, shared.unavailable, { backgroundColor: p.disabledBg }]}
-      accessible
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: true }}>
-      <Text style={[shared.unavailableText, { color: p.disabledInk }]}>{label}</Text>
-    </View>
   );
 }
 
@@ -227,95 +189,6 @@ export function BatteryBars({ level }: { level: BatteryLevel }) {
   );
 }
 
-export function StatTile({ label, value, leading }: { label: string; value: string; leading?: ReactNode }) {
-  const s = useThemedStyles(statStyles);
-  return (
-    <View style={s.stat} accessible accessibilityLabel={`${label}: ${value}`}>
-      <T variant="small" style={{ fontSize: 12 }}>
-        {label}
-      </T>
-      <View style={s.row}>
-        {leading}
-        <Text style={s.value} numberOfLines={1} adjustsFontSizeToFit>
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-const statStyles = (p: Palette) =>
-  StyleSheet.create({
-  stat: {
-    flex: 1,
-    backgroundColor: p.surface,
-    borderWidth: 1,
-    borderColor: p.border,
-    borderRadius: R.tile,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  value: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink, flexShrink: 1 },
-  });
-
-// ---- Radar rings -------------------------------------------------------------
-
-/**
- * Concentric "ping" rings from the design. Static guide rings are always
- * drawn; animated rings only when `active` and the user allows motion.
- */
-export function Radar({
-  size,
-  active,
-  ringColor,
-  guideColor,
-  dashed,
-  duration = 3000,
-  rings = 3,
-  children,
-}: {
-  size: number;
-  active: boolean;
-  ringColor: string;
-  guideColor: string;
-  dashed?: boolean;
-  duration?: number;
-  rings?: number;
-  children?: ReactNode;
-}) {
-  const reduceMotion = useReducedMotion();
-  const guide: ViewStyle = {
-    borderColor: guideColor,
-    borderStyle: dashed ? 'dashed' : 'solid',
-    borderWidth: dashed ? 2 : 1,
-  };
-  return (
-    <View style={[shared.center, { width: size, height: size }]} aria-hidden>
-      <View style={[StyleSheet.absoluteFill, shared.ring, guide]} />
-      <View style={[shared.ring, guide, { position: 'absolute', width: size * 0.7, height: size * 0.7 }]} />
-      {active &&
-        !reduceMotion &&
-        Array.from({ length: rings }, (_, i) => (
-          <PingRing key={i} color={ringColor} duration={duration} delay={(duration / rings) * i} />
-        ))}
-      {children}
-    </View>
-  );
-}
-
-function PingRing({ color, duration, delay }: { color: string; duration: number; delay: number }) {
-  const t = useSharedValue(0);
-  useEffect(() => {
-    t.value = withDelay(delay, withRepeat(withTiming(1, { duration, easing: Easing.out(Easing.quad) }), -1, false));
-  }, [t, duration, delay]);
-  const style = useAnimatedStyle(() => ({
-    opacity: 0.7 * (1 - t.value),
-    transform: [{ scale: 0.55 + 0.6 * t.value }],
-  }));
-  return <Animated.View style={[StyleSheet.absoluteFill, shared.ring, { borderColor: color, borderWidth: 2 }, style]} />;
-}
-
 // ---- Time --------------------------------------------------------------------
 
 /** "Just now", "5 min ago", "2:15 PM", "Mon 9:03 AM". */
@@ -332,147 +205,225 @@ export function formatWhen(ts: number | null, now = Date.now()): string {
 
 const shared = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoMark: { width: 34, height: 34, borderRadius: 17 },
-  logoText: { fontFamily: F.display, fontSize: 24, letterSpacing: -0.4 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 8,
-    borderRadius: R.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  chipDot: { width: 8, height: 8, borderRadius: 4 },
-  chipText: { fontFamily: F.bodySemibold, fontSize: 13 },
   button: {
-    minHeight: 58,
+    minHeight: 50,
     borderRadius: R.button,
-    borderWidth: 1,
+    borderCurve: 'continuous',
     paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
   },
-  buttonText: { fontFamily: F.bodySemibold, fontSize: 17 },
-  unavailable: { minHeight: 54, borderRadius: R.button },
-  unavailableText: { fontFamily: F.bodySemibold, fontSize: 16 },
+  buttonText: { ...F.bodySemibold, fontSize: 17 },
   bars: { flexDirection: 'row', gap: 3 },
   bar: { width: 6, height: 14, borderRadius: 2 },
-  ring: { borderRadius: 9999 },
 });
 
 // ---- Screen header -------------------------------------------------------------
 
-/** "‹ Home    Title    " row used at the top of pushed and modal screens. */
-export function ScreenHeader({
-  title,
-  backLabel,
-  onBack,
-  chevron = true,
-  color,
-  right,
-}: {
-  title: string;
-  backLabel: string;
-  onBack: () => void;
-  chevron?: boolean;
-  color?: string;
-  right?: ReactNode;
-}) {
+const header = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
+  side: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 80, minHeight: 44 },
+  link: { ...F.body, fontSize: 17 },
+  title: { ...F.bodySemibold, fontSize: 17, flexShrink: 1, textAlign: 'center' },
+});
+
+/** The system switch (UISwitch), tinted with the theme colour. */
+export function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
   const p = usePalette();
-  const c = color ?? p.link;
+  return <Switch value={value} onValueChange={onChange} accessibilityLabel={label} trackColor={{ true: p.primary }} />;
+}
+
+// ---- Grouped lists (like the Settings app) -------------------------------------------
+
+/**
+ * An inset grouped list section: optional small header above, white rounded
+ * group, hairline separators between rows, optional footer note below.
+ */
+export function Section({
+  header,
+  footer,
+  children,
+  style,
+}: {
+  header?: string;
+  footer?: ReactNode;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const s = useThemedStyles(listStyles);
+  const rows = Children.toArray(children).filter((c) => isValidElement(c) || typeof c === 'string');
   return (
-    <View style={header.row}>
-      <Pressable accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} hitSlop={8} style={header.side}>
-        {chevron && <Icon name="chevron.left" size={17} color={c} weight="semibold" />}
-        <Text style={[header.link, { color: c }]}>{backLabel}</Text>
-      </Pressable>
-      <Text style={[header.title, { color: color ?? p.ink }]} accessibilityRole="header" numberOfLines={1}>
-        {title}
-      </Text>
-      <View style={[header.side, { justifyContent: 'flex-end' }]}>{right}</View>
+    <View style={[s.section, style]}>
+      {header && (
+        <Text style={s.header} accessibilityRole="header">
+          {header.toUpperCase()}
+        </Text>
+      )}
+      <View style={s.group}>
+        {rows.map((row, i) => (
+          <Fragment key={i}>
+            {i > 0 && <View style={s.separator} />}
+            {row}
+          </Fragment>
+        ))}
+      </View>
+      {typeof footer === 'string' ? <Text style={s.footer}>{footer}</Text> : footer}
     </View>
   );
 }
 
-const header = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
-  side: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 80, minHeight: 44 },
-  link: { fontFamily: F.bodySemibold, fontSize: 16 },
-  title: { fontFamily: F.bodySemibold, fontSize: 16, flexShrink: 1, textAlign: 'center' },
-});
-
-/** A switch styled like the design (wine track, white knob). */
-export function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
-  const p = usePalette();
-  return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityState={{ checked: value }}
-      accessibilityLabel={label}
-      onPress={() => onChange(!value)}
-      hitSlop={6}
-      style={[toggle.track, { backgroundColor: value ? p.primary : p.idle }]}>
-      <View style={[toggle.knob, { left: value ? 23 : 3 }]} />
-    </Pressable>
-  );
-}
-
-const toggle = StyleSheet.create({
-  track: { width: 52, height: 32, borderRadius: 16 },
-  knob: { position: 'absolute', top: 3, width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff' },
-});
-
-/** Tappable row with a soft icon tile, title, subtitle and chevron. */
-export function LinkRow({
+/** One row in a Section: icon square, title (+ subtitle), value on the right, chevron. */
+export function Row({
   icon,
+  iconColor,
   title,
   subtitle,
+  value,
+  right,
   onPress,
+  chevron,
+  destructive,
+  tinted,
   accessibilityHint,
+  accessibilityLabel,
 }: {
-  icon: IconName;
+  icon?: IconName;
+  iconColor?: string;
   title: string;
   subtitle?: string;
-  onPress: () => void;
+  value?: string;
+  right?: ReactNode;
+  onPress?: () => void;
+  chevron?: boolean;
+  destructive?: boolean;
+  tinted?: boolean;
   accessibilityHint?: string;
+  accessibilityLabel?: string;
 }) {
   const p = usePalette();
+  const s = useThemedStyles(listStyles);
+  const showChevron = chevron ?? (!!onPress && !destructive && !tinted);
+  const titleColor = destructive ? p.garnet : tinted ? p.link : p.ink;
+  const label = accessibilityLabel ?? [title, subtitle, value].filter(Boolean).join('. ');
+  const content = (
+    <>
+      {icon && <IconTile name={icon} color={iconColor} />}
+      <View style={{ flex: 1 }}>
+        <Text style={[s.title, { color: titleColor }]}>{title}</Text>
+        {subtitle && <Text style={s.subtitle}>{subtitle}</Text>}
+      </View>
+      {value !== undefined && (
+        <Text style={s.value} numberOfLines={1}>
+          {value}
+        </Text>
+      )}
+      {right}
+      {showChevron && <Icon name="chevron.right" size={14} color={p.idle} weight="semibold" />}
+    </>
+  );
+  if (!onPress) {
+    return (
+      <View style={s.row} accessible={!right} accessibilityLabel={right ? undefined : label}>
+        {content}
+      </View>
+    );
+  }
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
+      accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
       onPress={onPress}
-      style={({ pressed }) => [
-        linkRow.row,
-        { backgroundColor: p.surface, borderColor: p.border },
-        pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] },
-      ]}>
-      <IconTile name={icon} />
-      <View style={{ flex: 1 }}>
-        <Text style={[linkRow.title, { color: p.ink }]}>{title}</Text>
-        {subtitle && <Text style={[linkRow.sub, { color: p.muted }]}>{subtitle}</Text>}
-      </View>
-      <Icon name="chevron.right" size={15} color={p.muted} weight="semibold" />
+      style={({ pressed }) => [s.row, pressed && { backgroundColor: p.disabledBg }]}>
+      {content}
     </Pressable>
   );
 }
 
-const linkRow = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: R.card,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    minHeight: 64,
-  },
-  title: { fontFamily: F.bodySemibold, fontSize: 15 },
-  sub: { fontFamily: F.body, fontSize: 13, marginTop: 2 },
+const listStyles = (p: Palette) =>
+  StyleSheet.create({
+    section: { marginBottom: 28 },
+    header: { ...F.body, fontSize: 13, color: p.muted, marginBottom: 7, marginLeft: 16 },
+    footer: { ...F.body, fontSize: 13, lineHeight: 18, color: p.muted, marginTop: 7, marginHorizontal: 16 },
+    group: { backgroundColor: p.surface, borderRadius: R.card, borderCurve: 'continuous', overflow: 'hidden' },
+    separator: { height: StyleSheet.hairlineWidth, backgroundColor: p.divider, marginLeft: 16 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      minHeight: 44,
+      paddingVertical: 11,
+      paddingHorizontal: 16,
+    },
+    title: { ...F.body, fontSize: 17, lineHeight: 22 },
+    subtitle: { ...F.body, fontSize: 15, lineHeight: 20, color: p.muted, marginTop: 1 },
+    value: { ...F.body, fontSize: 17, color: p.muted, maxWidth: '55%' },
+  });
+
+// ---- Large title (tab screens) ---------------------------------------------------------
+
+/** iOS large title at the top of a tab screen, with an optional button on the right. */
+export function LargeTitle({ title, right }: { title: string; right?: ReactNode }) {
+  const p = usePalette();
+  return (
+    <View style={largeTitle.row}>
+      <Text style={[largeTitle.text, { color: p.ink }]} accessibilityRole="header" numberOfLines={1}>
+        {title}
+      </Text>
+      {right}
+    </View>
+  );
+}
+
+const largeTitle = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, marginBottom: 14 },
+  text: { ...F.display, fontSize: 34, lineHeight: 41, flexShrink: 1 },
 });
+
+// ---- Sheet header (modal screens) ---------------------------------------------------------
+
+/** Title in the middle, "Done" on the right (bold), optional action on the left. */
+export function SheetHeader({
+  title,
+  onDone,
+  doneLabel = 'Done',
+  left,
+}: {
+  title: string;
+  onDone?: () => void;
+  doneLabel?: string;
+  left?: ReactNode;
+}) {
+  const p = usePalette();
+  return (
+    <View style={header.row}>
+      <View style={header.side}>{left}</View>
+      <Text style={[header.title, { color: p.ink }]} accessibilityRole="header" numberOfLines={1}>
+        {title}
+      </Text>
+      {onDone ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={onDone}
+          hitSlop={8}
+          style={({ pressed }) => [header.side, { justifyContent: 'flex-end' }, pressed && { opacity: 0.5 }]}>
+          <Text style={[header.link, F.bodySemibold, { color: p.link }]}>{doneLabel}</Text>
+        </Pressable>
+      ) : (
+        <View style={header.side} />
+      )}
+    </View>
+  );
+}
+
+/** A plain "Cancel" text button for the left of a SheetHeader. */
+export function CancelButton({ onPress, label = 'Cancel' }: { onPress: () => void; label?: string }) {
+  const p = usePalette();
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={8} style={({ pressed }) => pressed && { opacity: 0.5 }}>
+      <Text style={[header.link, { color: p.link }]}>{label}</Text>
+    </Pressable>
+  );
+}
