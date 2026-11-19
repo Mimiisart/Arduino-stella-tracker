@@ -6,11 +6,12 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "minitag",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "edu.minitag.app",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "appleTeamId": "62PM76T846"
     },
     "android": {
       "adaptiveIcon": {

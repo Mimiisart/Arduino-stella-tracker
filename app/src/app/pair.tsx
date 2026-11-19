@@ -1,26 +1,42 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { FoundDevice } from '@/ble/minitag-client';
 import { useMiniTag } from '@/ble/minitag-context';
-import { Button, Card } from '@/components/minitag/ui';
-import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { Button, Icon, IconTile, Radar, T } from '@/components/minitag/ui';
+import { F, R } from '@/constants/minitag';
+import { usePalette, useThemedStyles } from '@/theme/theme-context';
+import { STATUS, type Palette } from '@/theme/themes';
 
 export default function PairScreen() {
+  const p = usePalette();
+  const styles = useThemedStyles(makeStyles);
   const tag = useMiniTag();
-  const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const [found, setFound] = useState<FoundDevice[]>([]);
   const [scanRunning, setScanRunning] = useState(true); // the first scan starts on mount
-  const [selected, setSelected] = useState<FoundDevice | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState('School ID');
   const [pairing, setPairing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const stopScan = useRef<(() => void) | null>(null);
   const scanning = scanRunning && tag.bluetooth === 'on';
   const { scan } = tag;
+
+  // Pre-select the only tracker found, so most people just tap Connect.
+  const selected = found.find((d) => d.id === selectedId) ?? (found.length === 1 ? found[0] : null);
 
   const beginScan = useCallback(() => {
     stopScan.current?.();
@@ -44,7 +60,7 @@ export default function PairScreen() {
   const searchAgain = () => {
     beginScan(); // stopping any old scan reports "done", so mark running afterwards
     setFound([]);
-    setSelected(null);
+    setSelectedId(null);
     setError(null);
     setScanRunning(true);
   };
@@ -64,101 +80,206 @@ export default function PairScreen() {
     }
   };
 
+  const btProblem =
+    tag.bluetooth === 'off'
+      ? 'Turn on Bluetooth in Control Centre to find your MiniTag.'
+      : tag.bluetooth === 'unauthorized'
+        ? 'MiniTag needs Bluetooth access to find your tracker.'
+        : null;
+
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      {tag.bluetooth !== 'on' && (
-        <Card>
-          <ThemedText type="smallBold">
-            {tag.bluetooth === 'unauthorized'
-              ? 'Allow Bluetooth for MiniTag in Settings, then come back.'
-              : tag.bluetooth === 'off'
-                ? 'Turn Bluetooth on to find your MiniTag.'
-                : 'Waiting for Bluetooth…'}
-          </ThemedText>
-        </Card>
-      )}
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={{ backgroundColor: p.ground }}
+        contentContainerStyle={[styles.page, { paddingBottom: insets.bottom + 24 }]}
+        keyboardShouldPersistTaps="handled">
+        <View style={styles.header}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} hitSlop={8} style={styles.headerSide}>
+            <Text style={styles.headerLink}>Cancel</Text>
+          </Pressable>
+          <Text style={styles.headerTitle}>Add MiniTag</Text>
+          <View style={styles.headerSide} />
+        </View>
 
-      <ThemedText type="smallBold">1. Choose your tracker</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        Make sure the MiniTag is powered on and close to your phone.
-      </ThemedText>
+        <View>
+          <T variant="title">Let&apos;s find your tracker</T>
+          <T variant="body" style={{ color: p.muted, marginTop: 8 }}>
+            Switch MiniTag on and hold it next to your phone.
+          </T>
+        </View>
 
-      <Card>
-        {found.length === 0 && (
-          <View style={styles.emptyRow}>
-            {scanning && <ActivityIndicator />}
-            <ThemedText type="small" themeColor="textSecondary">
-              {scanning ? 'Searching for MiniTag…' : 'No MiniTag found.'}
-            </ThemedText>
+        <View style={styles.radarCard} aria-hidden>
+          <Radar size={170} active={scanning} duration={2600} rings={2} ringColor={p.onPrimaryMuted} guideColor={p.primaryGuide}>
+            <View style={styles.phoneDot} />
+            {found.length > 0 && <View style={styles.tagDot} />}
+          </Radar>
+        </View>
+
+        {btProblem ? (
+          <View style={styles.problem}>
+            <T variant="bodyStrong" style={{ fontSize: 15, color: STATUS.dangerInk }}>
+              {btProblem}
+            </T>
+            {tag.bluetooth === 'unauthorized' && (
+              <Button title="Open Settings" onPress={() => Linking.openSettings()} style={styles.smallButton} />
+            )}
+          </View>
+        ) : (
+          <View accessibilityRole="radiogroup" accessibilityLabel="Trackers found" style={{ gap: 10 }}>
+            {found.length === 0 && (
+              <View style={styles.searchRow}>
+                <T variant="body" style={{ color: p.muted }}>
+                  {scanning ? 'Searching for MiniTag…' : 'No MiniTag found. Is it switched on?'}
+                </T>
+              </View>
+            )}
+            {found.map((d) => {
+              const isSelected = selected?.id === d.id;
+              return (
+                <Pressable
+                  key={d.id}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={`${d.name}, signal ${signalLabel(d.rssi)}`}
+                  onPress={() => setSelectedId(d.id)}
+                  style={[styles.deviceRow, isSelected && styles.deviceRowSelected]}>
+                  <IconTile name="person.text.rectangle.fill" />
+                  <View style={styles.flex}>
+                    <T variant="bodyStrong">{d.name}</T>
+                    <T variant="small" style={{ marginTop: 2 }}>
+                      Signal: {signalLabel(d.rssi)}
+                    </T>
+                  </View>
+                  <View style={[styles.check, !isSelected && styles.checkEmpty]}>
+                    {isSelected && <Icon name="checkmark" size={13} color="#fff" weight="heavy" />}
+                  </View>
+                </Pressable>
+              );
+            })}
+            {!scanning && <Button title="Search again" variant="outline" onPress={searchAgain} />}
           </View>
         )}
-        {found.map((d) => {
-          const isSelected = selected?.id === d.id;
-          return (
-            <Pressable
-              key={d.id}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: isSelected }}
-              accessibilityLabel={`${d.name}, signal ${signalLabel(d.rssi)}`}
-              onPress={() => setSelected(d)}
-              style={[
-                styles.deviceRow,
-                { borderColor: isSelected ? theme.accent : theme.backgroundSelected },
-              ]}>
-              <ThemedText type="smallBold">{d.name}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                Signal: {signalLabel(d.rssi)}
-              </ThemedText>
-            </Pressable>
-          );
-        })}
-        {!scanning && (
-          <Button title="Search again" variant="secondary" onPress={searchAgain} disabled={tag.bluetooth !== 'on'} />
+
+        <View>
+          <Text style={styles.inputLabel} nativeID="tagNameLabel">
+            Name it
+          </Text>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="School ID"
+            placeholderTextColor={p.muted}
+            maxLength={30}
+            returnKeyType="done"
+            accessibilityLabelledBy="tagNameLabel"
+            accessibilityLabel="Tracker name"
+            style={styles.input}
+          />
+        </View>
+
+        {error && (
+          <T variant="body" style={{ color: STATUS.dangerInk }} accessibilityLiveRegion="assertive">
+            {error}
+          </T>
         )}
-      </Card>
 
-      <ThemedText type="smallBold">2. Name it</ThemedText>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="School ID"
-        placeholderTextColor={theme.textSecondary}
-        maxLength={30}
-        accessibilityLabel="Tracker name"
-        style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }]}
-      />
-
-      {error && (
-        <ThemedText type="small" style={{ color: theme.danger }}>
-          {error}
-        </ThemedText>
-      )}
-
-      <Button title="Connect" onPress={pair} disabled={!selected} loading={pairing} large />
-    </ScrollView>
+        <Button title="Connect" onPress={pair} disabled={!selected} loading={pairing} />
+        <T variant="caption">MiniTag uses Bluetooth to connect, beep and warn you if you leave it behind.</T>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 function signalLabel(rssi: number | null): string {
   if (rssi == null) return 'unknown';
-  if (rssi >= -60) return 'strong';
+  if (rssi >= -60) return 'strong · right next to you';
   if (rssi >= -80) return 'good';
-  return 'weak';
+  return 'weak · move closer';
 }
 
-const styles = StyleSheet.create({
-  content: { padding: Spacing.three, gap: Spacing.three },
-  emptyRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minHeight: 48 },
-  deviceRow: {
-    borderWidth: 2,
-    borderRadius: 12,
-    padding: Spacing.three,
-    gap: Spacing.half,
+const makeStyles = (p: Palette) =>
+  StyleSheet.create({
+  flex: { flex: 1 },
+  page: { paddingHorizontal: 20, paddingTop: 12, gap: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
+  headerSide: { width: 64, minHeight: 44, justifyContent: 'center' },
+  headerLink: { fontFamily: F.bodySemibold, fontSize: 16, color: p.primary },
+  headerTitle: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink },
+  radarCard: {
+    backgroundColor: p.primary,
+    borderRadius: R.hero,
+    height: 210,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  input: {
-    minHeight: 48,
+  phoneDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#fff',
+    borderWidth: 7,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  tagDot: {
+    position: 'absolute',
+    top: 24,
+    right: 22,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: p.accent,
+  },
+  searchRow: {
+    minHeight: 72,
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: p.inputBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  problem: {
+    backgroundColor: STATUS.dangerBg,
+    borderColor: STATUS.dangerBorder,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    gap: 10,
+  },
+  smallButton: { alignSelf: 'flex-start', minHeight: 44, borderRadius: 14 },
+  deviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: p.surface,
+    borderRadius: R.card,
+    borderWidth: 2,
+    borderColor: p.border,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  deviceRowSelected: { borderColor: p.primary },
+  check: {
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    paddingHorizontal: Spacing.three,
-    fontSize: 16,
+    backgroundColor: p.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkEmpty: { backgroundColor: 'transparent', borderWidth: 2, borderColor: p.inputBorder },
+  inputLabel: { fontFamily: F.bodySemibold, fontSize: 13, color: p.muted, marginBottom: 6 },
+  input: {
+    minHeight: 54,
+    borderWidth: 1,
+    borderColor: p.inputBorder,
+    borderRadius: R.tile,
+    paddingHorizontal: 16,
+    fontFamily: F.bodyMedium,
+    fontSize: 17,
+    color: p.ink,
+    backgroundColor: p.surface,
   },
 });

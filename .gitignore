@@ -7,3 +7,7 @@ __pycache__/
 
 # Arduino build output
 firmware/**/build/
+
+# Expo generated native projects (Continuous Native Generation)
+app/ios/
+app/android/
