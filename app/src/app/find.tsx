@@ -1,19 +1,17 @@
 import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMiniTag } from '@/ble/minitag-context';
 import { FIND_DEFAULT_SECONDS } from '@/ble/protocol';
-import { Button, Icon, Radar, T } from '@/components/minitag/ui';
-import { F } from '@/constants/minitag';
+import { Button, Icon, SheetHeader, T } from '@/components/minitag/ui';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
 import { type Palette } from '@/theme/themes';
 
 /**
- * Find My ID: sends FIND when opened. While the tag beeps the whole screen
- * turns wine with pulsing rings; Stop works here or from the tag's button.
+ * Play Sound (a sheet, like Find My): sends FIND when opened, shows the
+ * speaker animating while the tag beeps. Stop works here or from the tag's button.
  */
 export default function FindScreen() {
   const p = usePalette();
@@ -26,7 +24,7 @@ export default function FindScreen() {
 
   const connected = tag.connection === 'connected';
   const buzzing = connected && !!tag.status?.buzzing;
-  const name = tag.tracker?.name ?? 'MiniTag';
+  const name = tag.tracker?.name ?? 'MiTag';
 
   // Why the beeping stopped, if the tag ended it. A new FIND produces an
   // "OK FIND" event, which clears this automatically.
@@ -48,7 +46,7 @@ export default function FindScreen() {
     [tag],
   );
 
-  // Start beeping as soon as the screen opens.
+  // Start beeping as soon as the sheet opens.
   useEffect(() => {
     if (connected && !started.current) {
       started.current = true;
@@ -56,7 +54,7 @@ export default function FindScreen() {
     }
   }, [connected, run]);
 
-  // Stop the buzzer if the user leaves while it is sounding.
+  // Stop the buzzer if the user closes the sheet while it is sounding.
   const buzzingRef = useRef(buzzing);
   useEffect(() => {
     buzzingRef.current = buzzing;
@@ -69,99 +67,71 @@ export default function FindScreen() {
     [],
   );
 
-  const on = buzzing;
-  const fg = on ? p.onPrimary : p.ink;
-  const sub = on ? p.onPrimaryMuted : p.muted;
-
   const noTracker = !tag.tracker;
-  const headline = noTracker ? 'Set up MiniTag first' : !connected ? 'Not connected' : on ? `${name} is beeping` : endedBy ? 'Stopped. Found it?' : 'Ready to beep';
-  const detail = noTracker
-    ? 'Pair the MiniTag on your ID-card holder. Then this screen makes it beep so you can follow the sound.'
+  const headline = noTracker
+    ? 'Set Up MiTag First'
     : !connected
-    ? 'Move closer to where you last had it. MiniTag reconnects by itself.'
-    : on
-      ? 'Follow the sound. Press the button on the tag, or tap Stop, when you find it.'
-      : endedBy === 'button'
-        ? 'Stopped from the tag. Nice, you found it.'
-        : endedBy === 'timeout'
-          ? `It stopped after ${FIND_DEFAULT_SECONDS} seconds. Tap Beep again if you still can't see it.`
-          : 'Tap Beep again if you still can’t see it.';
+      ? 'Not Connected'
+      : buzzing
+        ? 'Playing Sound…'
+        : endedBy
+          ? 'Sound Stopped'
+          : 'Ready';
+  const detail = noTracker
+    ? 'Pair the MiTag on your ID-card holder. Then you can make it beep and follow the sound.'
+    : !connected
+      ? 'Move closer to where you last had it. MiTag reconnects by itself.'
+      : buzzing
+        ? `${name} is beeping. Press the button on the tag, or tap Stop Sound, when you find it.`
+        : endedBy === 'button'
+          ? 'Stopped from the tag, so you found it.'
+          : endedBy === 'timeout'
+            ? `It stopped after ${FIND_DEFAULT_SECONDS} seconds. Play it again if you still can't see it.`
+            : `Play a sound on ${name} to find it nearby.`;
 
   return (
-    <View style={[styles.screen, { backgroundColor: on ? p.primary : p.ground, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 20 }]}>
-      <StatusBar style={on || p.mode === 'dark' ? 'light' : 'dark'} />
-
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back to Home" onPress={() => router.back()} hitSlop={8} style={styles.back}>
-          <Icon name="chevron.left" size={17} color={fg} weight="semibold" />
-          <Text style={[styles.headerText, { color: fg }]}>Home</Text>
-        </Pressable>
-        <Text style={[styles.headerText, { color: fg }]}>Find My ID</Text>
-        <View style={styles.back} />
-      </View>
+    <View style={[styles.screen, { paddingBottom: insets.bottom + 16 }]}>
+      <SheetHeader title="Play Sound" onDone={() => router.back()} />
 
       <View style={styles.center}>
-        <Radar
-          size={290}
-          active={on}
-          duration={2400}
-          ringColor={on ? p.onPrimaryMuted : p.border}
-          guideColor={on ? 'rgba(242,217,217,0.28)' : p.border}>
-          <View
-            style={[
-              styles.core,
-              { backgroundColor: on ? p.accent : p.primarySoft },
-              on && styles.coreGlow,
-            ]}>
-            <Icon name="speaker.wave.2.fill" size={52} color={on ? p.primary : p.muted} />
-          </View>
-        </Radar>
-
-        <View style={{ alignItems: 'center' }}>
-          <T variant="title" accessibilityRole="header" accessibilityLiveRegion="polite" style={[styles.centerText, { color: fg }]}>
-            {headline}
-          </T>
-          <T variant="body" style={[styles.centerText, styles.detail, { color: sub }]}>
-            {detail}
-          </T>
+        <View style={[styles.circle, { backgroundColor: buzzing ? p.primary : p.primarySoft }]}>
+          <Icon
+            name={buzzing ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill'}
+            size={50}
+            color={buzzing ? p.onPrimary : p.link}
+            animationSpec={
+              buzzing ? { repeating: true, variableAnimationSpec: { iterative: true, dimInactiveLayers: true } } : undefined
+            }
+          />
         </View>
+        <T variant="title" accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.centerText}>
+          {headline}
+        </T>
+        <T variant="small" style={[styles.centerText, styles.detail]}>
+          {detail}
+        </T>
+        {error && (
+          <T variant="small" style={[styles.centerText, { color: p.dangerInk }]} accessibilityLiveRegion="assertive">
+            {error}
+          </T>
+        )}
       </View>
 
-      {error && (
-        <T variant="body" style={[styles.centerText, { color: on ? p.accent : p.dangerInk, marginBottom: 12 }]} accessibilityLiveRegion="assertive">
-          {error}
-        </T>
-      )}
-
-      {on ? (
-        <View style={{ gap: 10 }}>
-          <Button title="Stop" variant="accent" loading={busy} onPress={() => run('STOP')} />
-          <T variant="small" style={[styles.centerText, { color: p.onPrimaryMuted }]}>
-            The tag stops by itself after {FIND_DEFAULT_SECONDS} seconds.
-          </T>
-        </View>
+      {buzzing ? (
+        <Button title="Stop Sound" icon="stop.fill" loading={busy} onPress={() => run('STOP')} />
       ) : noTracker ? (
-        <View style={{ gap: 10 }}>
-          <Button title="Set up MiniTag" onPress={() => router.replace('/pair')} />
-          <Button title="Not now" variant="outline" onPress={() => router.back()} />
-        </View>
+        <Button title="Set Up MiTag" onPress={() => router.replace('/pair')} />
       ) : (
-        <View style={{ gap: 10 }}>
-          <Button title="Beep again" icon="speaker.wave.2.fill" loading={busy} disabled={!connected} onPress={() => run('FIND')} />
-          <Button title="Done" variant="outline" onPress={() => router.back()} />
-        </View>
+        <Button
+          title="Play Sound"
+          icon="speaker.wave.2.fill"
+          loading={busy}
+          disabled={!connected}
+          onPress={() => run('FIND')}
+        />
       )}
-
       {!noTracker && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push('/precision')}
-          style={({ pressed }) => [styles.precisionLink, pressed && { opacity: 0.7 }]}>
-          <Text style={[styles.headerText, { fontSize: 15, color: on ? p.accent : p.link }]}>
-            Can&apos;t hear it? Try Precision Find
-          </Text>
-          <Icon name="chevron.right" size={14} color={on ? p.accent : p.link} weight="semibold" />
-        </Pressable>
+        <Button title="Can't Hear It? Try Precision Find" variant="ghost" onPress={() => router.push('/precision')} />
       )}
     </View>
   );
@@ -169,14 +139,9 @@ export default function FindScreen() {
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: 20 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
-  back: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 72, minHeight: 44 },
-  headerText: { fontFamily: F.bodySemibold, fontSize: 16 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 28 },
-  core: { width: 116, height: 116, borderRadius: 58, alignItems: 'center', justifyContent: 'center' },
-  coreGlow: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 14 } },
-  centerText: { textAlign: 'center' },
-  detail: { marginTop: 10, maxWidth: 310 },
-  precisionLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44, marginTop: 6 },
-});
+    screen: { flex: 1, paddingHorizontal: 20, paddingTop: 8, backgroundColor: p.ground, gap: 8 },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
+    circle: { width: 112, height: 112, borderRadius: 56, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+    centerText: { textAlign: 'center' },
+    detail: { maxWidth: 320 },
+  });
