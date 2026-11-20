@@ -5,13 +5,13 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ONBOARDED_KEY, useMiniTag } from '@/ble/minitag-context';
-import { Button, Icon, IconTile, Radar, T, type IconName } from '@/components/minitag/ui';
-import { F, R } from '@/constants/minitag';
+import { Button, Icon, T, type IconName } from '@/components/minitag/ui';
+import { F } from '@/constants/minitag';
 import { useAppData } from '@/features/app-data';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
 import type { Palette } from '@/theme/themes';
 
-/** First launch: explain each permission before iOS asks for it. */
+/** First launch, in the style of Apple's welcome screens: explain each permission before iOS asks. */
 export default function WelcomeScreen() {
   const p = usePalette();
   const s = useThemedStyles(makeStyles);
@@ -36,67 +36,49 @@ export default function WelcomeScreen() {
 
   return (
     <ScrollView
-      style={{ backgroundColor: p.ground }}
-      contentContainerStyle={[s.page, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 }]}>
-      <View style={s.hero} aria-hidden>
-        <Radar size={120} active ringColor={p.onPrimaryMuted} guideColor={p.primaryGuide} rings={2}>
-          <View style={s.core}>
-            <Icon name="person.text.rectangle.fill" size={30} color={p.primary} />
-          </View>
-        </Radar>
-      </View>
-
-      <View>
-        <T variant="title">Never lose your ID again</T>
-        <T variant="body" style={{ color: p.muted, marginTop: 8 }}>
-          MiniTag needs a few permissions to find and protect your ID card.
-        </T>
-      </View>
+      style={{ backgroundColor: p.surface }}
+      contentContainerStyle={[s.page, { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 20 }]}>
+      <Text style={s.title} accessibilityRole="header">
+        Welcome to{'\n'}
+        <Text style={{ color: p.link }}>MiTag</Text>
+      </Text>
 
       <View style={s.list} accessibilityLabel="Permissions">
-        <Permission icon="dot.radiowaves.left.and.right" title="Bluetooth" body="Connects to your tag so it can beep." required />
-        <Permission
-          icon="mappin.and.ellipse"
-          title="Location"
-          body="Remembers where your phone was when the tag disconnected."
-          divider
+        <Feature
+          icon="dot.radiowaves.left.and.right"
+          title="Bluetooth"
+          body="Connects to the tag on your ID-card holder so it can beep. Required."
         />
-        <Permission icon="bell" title="Notifications" body="Warns you if you walk away from your ID." divider />
+        <Feature
+          icon="location.fill"
+          title="Location"
+          body="Remembers where your phone was when the tag disconnected. Optional."
+        />
+        <Feature icon="bell.badge.fill" title="Notifications" body="Warns you if you walk away from your ID. Optional." />
       </View>
 
       <View style={{ flex: 1 }} />
 
-      <Button title="Allow and continue" onPress={() => finish(true)} loading={busy} />
-      <Button title="Not now" variant="ghost" onPress={() => finish(false)} disabled={busy} />
-      <T variant="caption">You can change these any time in Settings.</T>
+      <T variant="caption" style={{ marginBottom: 14 }}>
+        You can change these at any time in Settings.
+      </T>
+      <Button title="Continue" onPress={() => finish(true)} loading={busy} />
+      <Button title="Not Now" variant="ghost" onPress={() => finish(false)} disabled={busy} style={{ marginTop: 4 }} />
     </ScrollView>
   );
 }
 
-function Permission({
-  icon,
-  title,
-  body,
-  required,
-  divider,
-}: {
-  icon: IconName;
-  title: string;
-  body: string;
-  required?: boolean;
-  divider?: boolean;
-}) {
+function Feature({ icon, title, body }: { icon: IconName; title: string; body: string }) {
   const p = usePalette();
   const s = useThemedStyles(makeStyles);
   return (
-    <View style={[s.row, divider && { borderTopWidth: 1, borderTopColor: p.divider }]} accessible>
-      <IconTile name={icon} />
+    <View style={s.row} accessible accessibilityLabel={`${title}. ${body}`}>
+      <View style={s.iconWrap}>
+        <Icon name={icon} size={30} color={p.link} />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={s.rowTitle}>{title}</Text>
         <Text style={s.rowBody}>{body}</Text>
-      </View>
-      <View style={[s.pill, { backgroundColor: required ? p.primary : p.primarySoft }]}>
-        <Text style={[s.pillText, { color: required ? p.onPrimary : p.link }]}>{required ? 'Required' : 'Optional'}</Text>
       </View>
     </View>
   );
@@ -104,33 +86,11 @@ function Permission({
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    page: { flexGrow: 1, paddingHorizontal: 20, gap: 14 },
-    hero: {
-      backgroundColor: p.primary,
-      borderRadius: R.hero,
-      height: 150,
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-    core: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: p.accent,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    list: {
-      backgroundColor: p.surface,
-      borderWidth: 1,
-      borderColor: p.border,
-      borderRadius: R.section,
-      paddingHorizontal: 16,
-    },
-    row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 72, paddingVertical: 10 },
-    rowTitle: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink },
-    rowBody: { fontFamily: F.body, fontSize: 13, lineHeight: 18, color: p.muted, marginTop: 1 },
-    pill: { borderRadius: R.pill, paddingHorizontal: 10, paddingVertical: 4 },
-    pillText: { fontFamily: F.bodySemibold, fontSize: 12 },
+    page: { flexGrow: 1, paddingHorizontal: 28 },
+    title: { ...F.display, fontSize: 34, lineHeight: 41, color: p.ink, textAlign: 'center', marginBottom: 44 },
+    list: { gap: 26 },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+    iconWrap: { width: 44, alignItems: 'center' },
+    rowTitle: { ...F.bodySemibold, fontSize: 15, lineHeight: 20, color: p.ink },
+    rowBody: { ...F.body, fontSize: 15, lineHeight: 20, color: p.muted },
   });
