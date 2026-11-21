@@ -1,30 +1,34 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { friendlyAuthError, useAuth } from '@/backend/auth-context';
 import { useMiniTag } from '@/ble/minitag-context';
 import { batteryLevel } from '@/ble/protocol';
-import { BATTERY_LABEL, Button, Icon, T, Toggle, type IconName } from '@/components/minitag/ui';
-import { F, R } from '@/constants/minitag';
-import { ALERT_DELAYS, useAppData, type AlertDelay } from '@/features/app-data';
+import { BATTERY_LABEL, Icon, LargeTitle, Row, Section, T, Toggle } from '@/components/minitag/ui';
+import { F } from '@/constants/minitag';
+import { ALERT_DELAYS, useAppData } from '@/features/app-data';
+import { useCampus } from '@/features/campus';
 import { useAppTheme, useThemedStyles } from '@/theme/theme-context';
-import { THEMES, THEME_IDS, type ModePreference, type Palette, type ThemeId } from '@/theme/themes';
+import { THEMES, THEME_IDS, type ModePreference, type Palette } from '@/theme/themes';
 
-const MODES: { id: ModePreference; label: string; icon: IconName }[] = [
-  { id: 'light', label: 'Light', icon: 'sun.max' },
-  { id: 'dark', label: 'Dark', icon: 'moon' },
-  { id: 'system', label: 'Match iPhone', icon: 'iphone' },
+const MODES: { id: ModePreference; label: string }[] = [
+  { id: 'system', label: 'Match iPhone' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
 ];
+
+function delayLabel(d: number) {
+  return d < 60 ? `${d} seconds` : `${d / 60} minute${d === 60 ? '' : 's'}`;
+}
 
 export default function SettingsScreen() {
   const tag = useMiniTag();
   const data = useAppData();
+  const campus = useCampus();
   const { palette: p, themeId, setTheme, modePreference, setModePreference } = useAppTheme();
   const s = useThemedStyles(makeStyles);
-  const insets = useSafeAreaInsets();
   const [draftName, setDraftName] = useState(tag.tracker?.name ?? '');
   const [openedAt] = useState(Date.now);
   const snoozed = !!data.prefs.snoozedUntil && data.prefs.snoozedUntil > openedAt;
@@ -32,7 +36,9 @@ export default function SettingsScreen() {
   const connected = tag.connection === 'connected';
   const level = batteryLevel(tag.status);
   const statusLine = connected
-    ? [`Battery ${BATTERY_LABEL[level].toLowerCase()}`, tag.status && `Firmware ${tag.status.firmware}`].filter(Boolean).join(' · ')
+    ? [`Battery ${BATTERY_LABEL[level].toLowerCase()}`, tag.status && `firmware ${tag.status.firmware}`]
+        .filter(Boolean)
+        .join(' · ')
     : 'Not connected right now';
 
   const saveName = () => {
@@ -42,65 +48,52 @@ export default function SettingsScreen() {
   };
 
   const confirmRemove = () =>
-    Alert.alert(`Remove ${tag.tracker?.name ?? 'MiniTag'}?`, 'You can pair it again later.', [
+    Alert.alert(`Remove ${tag.tracker?.name ?? 'MiTag'}?`, 'You can pair it again later.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => tag.forget(),
-      },
+      { text: 'Remove', style: 'destructive', onPress: () => tag.forget() },
     ]);
+
+  const check = (on: boolean) => (on ? <Icon name="checkmark" size={17} color={p.link} weight="semibold" /> : undefined);
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         style={{ backgroundColor: p.ground }}
-        contentContainerStyle={[s.page, { paddingTop: insets.top + 16, paddingBottom: 28 }]}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={s.page}
         keyboardShouldPersistTaps="handled">
-        <T variant="display" accessibilityRole="header">
-          Settings
-        </T>
+        <LargeTitle title="Settings" />
 
         <AccountSection />
 
+        <Section header="University" footer="Your campus map: buildings, floors and rooms for leave-behind alerts.">
+          <Row
+            icon="building.columns.fill"
+            title={campus.campus?.name ?? 'Choose Your University'}
+            subtitle={campus.campus ? `${campus.buildings.length} buildings · ${campus.rooms.length} rooms` : undefined}
+            onPress={() => router.push('/choose-campus')}
+          />
+        </Section>
+
         {/* Tracker */}
         {tag.tracker ? (
-          <View style={s.trackerCard}>
-            <View style={s.trackerIcon}>
-              <Icon name="person.text.rectangle.fill" size={26} color={p.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.trackerName} numberOfLines={1}>
-                {tag.tracker.name}
-              </Text>
-              <Text style={s.trackerSub}>{statusLine}</Text>
-            </View>
-            <View style={s.trackerChip}>
-              <View style={[s.dot, { backgroundColor: connected ? p.sageDot : p.idle }]} />
-              <Text style={s.trackerChipText}>{connected ? 'Connected' : 'Away'}</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={s.section}>
-            <View style={s.row}>
+          <Section header="Tracker" footer="The name shows on the Home screen and in alerts.">
+            <View style={s.trackerRow} accessible accessibilityLabel={`${tag.tracker.name}. ${statusLine}`}>
+              <View style={[s.trackerIcon, { backgroundColor: connected ? p.primary : p.disabledBg }]}>
+                <Icon name="person.text.rectangle.fill" size={24} color={connected ? '#FFFFFF' : p.idle} />
+              </View>
               <View style={{ flex: 1 }}>
-                <T variant="bodyStrong">No tracker yet</T>
-                <T variant="small" style={{ marginTop: 2 }}>
-                  Pair your MiniTag to see it here.
-                </T>
+                <Text style={s.trackerName} numberOfLines={1}>
+                  {tag.tracker.name}
+                </Text>
+                <View style={s.statusRow}>
+                  <View style={[s.dot, { backgroundColor: connected ? p.sageDot : p.idle }]} />
+                  <Text style={s.trackerSub}>{statusLine}</Text>
+                </View>
               </View>
             </View>
-            <Button title="Set up MiniTag" onPress={() => router.push('/pair')} style={{ marginBottom: 14 }} />
-          </View>
-        )}
-
-        {tag.tracker && (
-          <View style={s.section}>
-            <View style={s.sectionBody}>
-              <Text style={s.rowTitle} nativeID="renameLabel">
-                Tracker name
-              </Text>
-              <Text style={s.rowSub}>Shown on the home screen and in alerts</Text>
+            <View style={s.inputRow}>
+              <Text style={s.inputLabel}>Name</Text>
               <TextInput
                 value={draftName}
                 onChangeText={setDraftName}
@@ -109,167 +102,157 @@ export default function SettingsScreen() {
                 returnKeyType="done"
                 maxLength={30}
                 placeholder="School ID"
-                placeholderTextColor={p.muted}
+                placeholderTextColor={p.idle}
                 keyboardAppearance={p.mode}
-                accessibilityLabelledBy="renameLabel"
                 accessibilityLabel="Tracker name"
                 style={s.input}
               />
             </View>
-          </View>
+            <Row title="Battery" value={connected ? BATTERY_LABEL[level] : '—'} onPress={() => router.push('/battery')} />
+          </Section>
+        ) : (
+          <Section header="Tracker" footer="Pair the MiTag on your ID-card holder to see it here.">
+            <Row icon="plus" title="Set Up MiTag" onPress={() => router.push('/pair')} />
+          </Section>
         )}
 
         {/* Alerts */}
-        <View style={s.section}>
-          <View style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.rowTitle}>Leave-behind alerts</Text>
-              <Text style={[s.rowSub, { marginBottom: 0 }]}>Warn me if I walk away from my ID</Text>
-            </View>
-            <Toggle
-              value={data.prefs.alertsEnabled}
-              label="Leave-behind alerts"
-              onChange={async (v) => {
-                if (v && data.notificationPermission !== 'granted') await data.requestNotifications();
-                data.setPrefs({ alertsEnabled: v, snoozedUntil: null });
-              }}
-            />
-          </View>
+        <Section
+          header="Leave-behind alerts"
+          footer={
+            data.prefs.alertsEnabled && data.prefs.tagBeep
+              ? 'If the tracker loses your phone for 10 seconds, it also beeps for 20 seconds so people nearby notice your ID.'
+              : 'Warns you if you walk away from your ID.'
+          }>
+          <Row
+            title="Alerts"
+            right={
+              <Toggle
+                value={data.prefs.alertsEnabled}
+                label="Leave-behind alerts"
+                onChange={async (v) => {
+                  if (v && data.notificationPermission !== 'granted') await data.requestNotifications();
+                  data.setPrefs({ alertsEnabled: v, snoozedUntil: null });
+                }}
+              />
+            }
+          />
           {data.prefs.alertsEnabled && data.notificationPermission === 'denied' && (
-            <Pressable accessibilityRole="button" onPress={() => Linking.openSettings()} style={s.warn}>
-              <Text style={s.warnText}>Notifications are off for MiniTag, so alerts can&apos;t show. Tap to open Settings.</Text>
-            </Pressable>
+            <Row
+              title="Notifications Are Off"
+              subtitle="Alerts can't show. Turn them on in Settings."
+              tinted
+              onPress={() => Linking.openSettings()}
+            />
           )}
           {snoozed && data.prefs.snoozedUntil && (
-            <Pressable accessibilityRole="button" onPress={() => data.setPrefs({ snoozedUntil: null })} style={s.warn}>
-              <Text style={s.warnText}>
-                Alerts snoozed until{' '}
-                {new Date(data.prefs.snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Tap to
-                turn them back on.
-              </Text>
-            </Pressable>
+            <Row
+              title="Resume Alerts"
+              subtitle={`Snoozed until ${new Date(data.prefs.snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+              tinted
+              onPress={() => data.setPrefs({ snoozedUntil: null })}
+            />
           )}
           {data.prefs.alertsEnabled && (
-            <View style={[s.sectionBody, { borderTopWidth: 1, borderTopColor: p.divider }]}>
-              <Text style={[s.rowTitle, { fontSize: 15 }]}>Wait before alerting</Text>
-              <Text style={s.rowSub}>Gives MiniTag time to reconnect first</Text>
-              <View accessibilityRole="radiogroup" accessibilityLabel="Alert delay" style={s.segment}>
-                {ALERT_DELAYS.map((d: AlertDelay) => {
-                  const on = d === data.prefs.alertDelay;
-                  return (
-                    <Pressable
-                      key={d}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: on }}
-                      onPress={() => data.setPrefs({ alertDelay: d })}
-                      style={({ pressed }) => [
-                        s.chip,
-                        on && { backgroundColor: p.primary, borderColor: p.primary },
-                        pressed && { opacity: 0.85 },
-                      ]}>
-                      <Text style={[s.segmentText, { fontSize: 15, color: on ? p.onPrimary : p.ink }]}>
-                        {d < 60 ? `${d} s` : `${d / 60} min`}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+            <Row
+              title="Tracker Beeps Too"
+              right={
+                <Toggle
+                  value={data.prefs.tagBeep}
+                  label="Tracker beeps when left behind"
+                  onChange={(v) => data.setPrefs({ tagBeep: v })}
+                />
+              }
+            />
           )}
-          {data.prefs.alertsEnabled && (
-            <View style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.rowTitle, { fontSize: 15 }]}>Tracker beeps too</Text>
-                <Text style={[s.rowSub, { marginBottom: 0 }]}>
-                  If it loses your phone for 10 seconds, the tag beeps for 20 seconds so people nearby notice your ID
-                </Text>
-              </View>
-              <Toggle
-                value={data.prefs.tagBeep}
-                label="Tracker beeps when left behind"
-                onChange={(v) => data.setPrefs({ tagBeep: v })}
+        </Section>
+
+        {data.prefs.alertsEnabled && (
+          <Section header="Wait before alerting" footer="Gives MiTag time to reconnect first.">
+            {ALERT_DELAYS.map((d) => (
+              <Row
+                key={d}
+                title={delayLabel(d)}
+                right={check(d === data.prefs.alertDelay)}
+                chevron={false}
+                onPress={() => data.setPrefs({ alertDelay: d })}
+                accessibilityLabel={`${delayLabel(d)}${d === data.prefs.alertDelay ? ', selected' : ''}`}
               />
-            </View>
-          )}
-        </View>
+            ))}
+          </Section>
+        )}
 
         {/* Location */}
-        <View style={s.section}>
-          <View style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.rowTitle}>Remember last seen</Text>
-              <Text style={[s.rowSub, { marginBottom: 0 }]}>Save where my phone was when it disconnected</Text>
-            </View>
-            <Toggle
-              value={data.prefs.rememberLastSeen}
-              label="Remember last seen location"
-              onChange={async (v) => {
-                if (v && data.locationPermission !== 'granted') await data.requestLocation();
-                data.setPrefs({ rememberLastSeen: v });
-              }}
-            />
-          </View>
+        <Section header="Location" footer="Saves where your phone was when the tracker disconnected. Only you can see it.">
+          <Row
+            title="Remember Last Seen"
+            right={
+              <Toggle
+                value={data.prefs.rememberLastSeen}
+                label="Remember last seen location"
+                onChange={async (v) => {
+                  if (v && data.locationPermission !== 'granted') await data.requestLocation();
+                  data.setPrefs({ rememberLastSeen: v });
+                }}
+              />
+            }
+          />
           {data.prefs.rememberLastSeen && data.locationPermission === 'denied' && (
-            <Pressable accessibilityRole="button" onPress={() => Linking.openSettings()} style={s.warn}>
-              <Text style={s.warnText}>Location is off for MiniTag. Tap to open Settings.</Text>
-            </Pressable>
+            <Row title="Location Is Off" subtitle="Turn it on for MiTag in Settings." tinted onPress={() => Linking.openSettings()} />
           )}
           {data.history.length > 0 && (
-            <Pressable
-              accessibilityRole="button"
+            <Row
+              title="Clear Last-Seen History"
+              destructive
               onPress={() =>
-                Alert.alert('Clear last-seen history?', 'MiniTag forgets every place it has seen your ID.', [
+                Alert.alert('Clear last-seen history?', 'MiTag forgets every place it has seen your ID.', [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Clear', style: 'destructive', onPress: data.clearHistory },
                 ])
               }
-              style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider, minHeight: 50 }]}>
-              <Text style={[s.rowTitle, { fontSize: 15, color: p.link }]}>Clear last-seen history</Text>
-            </Pressable>
+            />
           )}
-        </View>
+        </Section>
 
         {/* Appearance */}
-        <View style={s.section}>
-          <View style={[s.sectionBody, { borderBottomWidth: 1, borderBottomColor: p.divider }]}>
-            <Text style={s.rowTitle}>Mode</Text>
-            <Text style={s.rowSub}>Light, dark, or follow your iPhone&apos;s setting</Text>
-            <View accessibilityRole="radiogroup" accessibilityLabel="Mode" style={s.segment}>
-              {MODES.map((m) => {
-                const on = m.id === modePreference;
-                return (
-                  <Pressable
-                    key={m.id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: on }}
-                    accessibilityLabel={m.label}
-                    onPress={() => setModePreference(m.id)}
-                    style={({ pressed }) => [
-                      s.segmentItem,
-                      on && { backgroundColor: p.primary, borderColor: p.primary },
-                      pressed && { opacity: 0.85 },
-                    ]}>
-                    <Icon name={m.icon} size={18} color={on ? p.onPrimary : p.muted} weight="semibold" />
-                    <Text style={[s.segmentText, { color: on ? p.onPrimary : p.ink }]}>{m.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-          <View style={s.sectionBody}>
-            <Text style={s.rowTitle}>Colour theme</Text>
-            <Text style={s.rowSub}>Changes the colours across MiniTag</Text>
-            <View accessibilityRole="radiogroup" accessibilityLabel="Colour theme" style={s.themeGrid}>
-              {THEME_IDS.map((id) => (
-                <ThemeOption key={id} id={id} selected={id === themeId} onPress={() => setTheme(id)} />
-              ))}
-            </View>
-          </View>
-        </View>
+        <Section header="Appearance">
+          {MODES.map((m) => (
+            <Row
+              key={m.id}
+              title={m.label}
+              right={check(m.id === modePreference)}
+              chevron={false}
+              onPress={() => setModePreference(m.id)}
+              accessibilityLabel={`${m.label}${m.id === modePreference ? ', selected' : ''}`}
+            />
+          ))}
+        </Section>
 
-        {tag.tracker && <Button title="Remove tracker" variant="remove" onPress={confirmRemove} />}
+        <Section header="Accent colour">
+          {THEME_IDS.map((id) => (
+            <Row
+              key={id}
+              title={THEMES[id].name}
+              right={
+                <>
+                  <View style={[s.swatch, { backgroundColor: THEMES[id][p.mode].primary }]} />
+                  <View style={{ width: 17 }}>{check(id === themeId)}</View>
+                </>
+              }
+              chevron={false}
+              onPress={() => setTheme(id)}
+              accessibilityLabel={`${THEMES[id].name}${id === themeId ? ', selected' : ''}`}
+            />
+          ))}
+        </Section>
 
-        <T variant="caption">MiniTag {Constants.expoConfig?.version ?? ''}</T>
+        {tag.tracker && (
+          <Section>
+            <Row title="Remove Tracker" destructive onPress={confirmRemove} />
+          </Section>
+        )}
+
+        <T variant="caption">MiTag {Constants.expoConfig?.version ?? ''}</T>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -286,18 +269,12 @@ function AccountSection() {
 
   if (!auth.session) {
     return (
-      <View style={s.section}>
-        <View style={s.sectionBody}>
-          <Text style={s.rowTitle}>Account</Text>
-          <Text style={s.rowSub}>
-            Optional. An account lets other MiniTag users help find your tag. Beeping, alerts and the map work without one.
-          </Text>
-          <View style={{ gap: 8 }}>
-            <Button title="Create account" onPress={() => router.push('/account?mode=signup')} style={{ minHeight: 50 }} />
-            <Button title="I already have an account" variant="outline" onPress={() => router.push('/account?mode=signin')} style={{ minHeight: 48 }} />
-          </View>
-        </View>
-      </View>
+      <Section
+        header="Account"
+        footer="Optional. An account lets other MiTag users help find your tag. Beeping, alerts and the map work without one.">
+        <Row icon="person.crop.circle.fill" title="Create Account" onPress={() => router.push('/account?mode=signup')} />
+        <Row title="Sign In" tinted onPress={() => router.push('/account?mode=signin')} />
+      </Section>
     );
   }
 
@@ -305,12 +282,12 @@ function AccountSection() {
   const confirmSignOut = () =>
     Alert.alert('Sign out?', 'Your tag keeps working. Sign back in any time.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', onPress: () => auth.signOut().catch(() => {}) },
+      { text: 'Sign Out', onPress: () => auth.signOut().catch(() => {}) },
     ]);
   const confirmDelete = () =>
     Alert.alert(
       'Delete your account and data?',
-      'This permanently deletes your account, name and email from MiniTag’s server. It can’t be undone. Your tag and settings on this phone stay.',
+      'This permanently deletes your account, name and email from MiTag’s server. It can’t be undone. Your tag and settings on this phone stay.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -332,179 +309,52 @@ function AccountSection() {
     );
 
   return (
-    <View style={s.section}>
-      <View style={[s.row, { minHeight: 76 }]}>
-        <View style={s.avatar}>
-          <Text style={s.avatarText}>{name.trim().charAt(0).toUpperCase() || '?'}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.rowTitle} numberOfLines={1}>
-            {name}
-          </Text>
-          <Text style={[s.rowSub, { marginBottom: 0 }]} numberOfLines={1}>
-            {auth.email}
-          </Text>
-        </View>
-      </View>
-      <Pressable
-        accessibilityRole="button"
-        onPress={confirmSignOut}
-        style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider, minHeight: 50 }]}>
-        <Text style={[s.rowTitle, { fontSize: 15, color: p.link }]}>Sign out</Text>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityHint="Permanently deletes your account, name and email"
-        disabled={busy}
-        onPress={confirmDelete}
-        style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider, minHeight: 50, opacity: busy ? 0.5 : 1 }]}>
-        <Text style={[s.rowTitle, { fontSize: 15, color: p.garnet }]}>Delete my data</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-/** A theme choice drawn as a tiny preview of that theme's home screen. */
-function ThemeOption({ id, selected, onPress }: { id: ThemeId; selected: boolean; onPress: () => void }) {
-  const s = useThemedStyles(makeStyles);
-  const { palette: current, mode } = useAppTheme();
-  const { name } = THEMES[id];
-  const t = THEMES[id][mode]; // preview in the mode that is showing now
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      accessibilityLabel={`${name} theme`}
-      onPress={onPress}
-      style={({ pressed }) => [
-        s.themeOption,
-        { borderColor: selected ? current.link : current.border },
-        selected && { borderWidth: 2, padding: 9 },
-        pressed && { opacity: 0.85 },
-      ]}>
-      <View style={[s.preview, { backgroundColor: t.ground, borderColor: t.border }]}>
-        <View style={[s.previewHero, { backgroundColor: t.primary }]}>
-          <View style={[s.previewCore, { backgroundColor: t.accent }]} />
-        </View>
-        <View style={[s.previewButton, { backgroundColor: t.primary }]} />
-      </View>
-      <View style={s.themeLabelRow}>
-        <Text style={[s.themeName, selected && { color: current.link }]}>{name}</Text>
-        {selected && (
-          <View style={[s.check, { backgroundColor: current.primary }]}>
-            <Icon name="checkmark" size={11} color={current.onPrimary} weight="heavy" />
+    <>
+      <Section>
+        <View style={s.trackerRow} accessible accessibilityLabel={`${name}. ${auth.email ?? ''}`}>
+          <View style={[s.avatar, { backgroundColor: p.idle }]}>
+            <Text style={s.avatarText}>{name.trim().charAt(0).toUpperCase() || '?'}</Text>
           </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.trackerName} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={s.trackerSub} numberOfLines={1}>
+              {auth.email}
+            </Text>
+          </View>
+        </View>
+      </Section>
+      <Section>
+        <Row title="Sign Out" tinted onPress={confirmSignOut} />
+        {busy ? (
+          <Row title="Deleting…" />
+        ) : (
+          <Row
+            title="Delete My Data"
+            destructive
+            onPress={confirmDelete}
+            accessibilityHint="Permanently deletes your account, name and email"
+          />
         )}
-      </View>
-    </Pressable>
+      </Section>
+    </>
   );
 }
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    page: { paddingHorizontal: 20, gap: 14 },
-    trackerCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 14,
-      backgroundColor: p.primary,
-      borderRadius: 26,
-      paddingVertical: 14,
-      paddingHorizontal: 16,
-    },
-    trackerIcon: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
-      backgroundColor: p.accent,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    trackerName: { fontFamily: F.display, fontSize: 24, color: p.onPrimary },
-    trackerSub: { fontFamily: F.body, fontSize: 13, color: p.onPrimaryMuted, marginTop: 2 },
-    trackerChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      backgroundColor: p.primaryChip,
-      borderRadius: R.pill,
-      paddingVertical: 5,
-      paddingHorizontal: 10,
-    },
-    trackerChipText: { fontFamily: F.bodySemibold, fontSize: 12, color: p.onPrimary },
-    dot: { width: 7, height: 7, borderRadius: 4 },
-    section: {
-      backgroundColor: p.surface,
-      borderWidth: 1,
-      borderColor: p.border,
-      borderRadius: R.section,
-      paddingHorizontal: 16,
-    },
-    sectionBody: { paddingTop: 14, paddingBottom: 16 },
-    row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64 },
-    rowTitle: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink },
-    rowSub: { fontFamily: F.body, fontSize: 13, color: p.muted, marginTop: 2, marginBottom: 12 },
-    input: {
-      minHeight: 50,
-      borderWidth: 1,
-      borderColor: p.inputBorder,
-      borderRadius: 16,
-      paddingHorizontal: 14,
-      fontFamily: F.bodyMedium,
-      fontSize: 16,
-      color: p.ink,
-      backgroundColor: p.ground,
-    },
-    segment: { flexDirection: 'row', gap: 8 },
-    avatar: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: p.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarText: { fontFamily: F.display, fontSize: 22, color: p.onPrimary },
-    chip: {
-      flex: 1,
-      minHeight: 46,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: p.border,
-      backgroundColor: p.ground,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    warn: { backgroundColor: p.primarySoft, borderRadius: 14, padding: 12, marginBottom: 12 },
-    warnText: { fontFamily: F.body, fontSize: 13, lineHeight: 18, color: p.ink },
-    segmentItem: {
-      flex: 1,
-      minHeight: 64,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: p.border,
-      backgroundColor: p.ground,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 4,
-      paddingHorizontal: 4,
-    },
-    segmentText: { fontFamily: F.bodySemibold, fontSize: 13, textAlign: 'center' },
-    themeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    themeOption: {
-      flexBasis: '47%',
-      flexGrow: 1,
-      borderWidth: 1,
-      borderRadius: R.tile,
-      padding: 10,
-      gap: 8,
-      backgroundColor: p.surface,
-    },
-    preview: { height: 72, borderRadius: 12, borderWidth: 1, padding: 6, gap: 5 },
-    previewHero: { flex: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-    previewCore: { width: 18, height: 18, borderRadius: 9 },
-    previewButton: { height: 10, borderRadius: 5, width: '70%', alignSelf: 'center' },
-    themeLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 22 },
-    themeName: { fontFamily: F.bodySemibold, fontSize: 15, color: p.ink },
-    check: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    page: { paddingHorizontal: 16, paddingBottom: 32 },
+    trackerRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
+    trackerIcon: { width: 44, height: 44, borderRadius: 10, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },
+    trackerName: { ...F.bodySemibold, fontSize: 17, lineHeight: 22, color: p.ink },
+    trackerSub: { ...F.body, fontSize: 15, lineHeight: 20, color: p.muted, flexShrink: 1 },
+    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 },
+    dot: { width: 8, height: 8, borderRadius: 4 },
+    inputRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingHorizontal: 16, gap: 12 },
+    inputLabel: { ...F.body, fontSize: 17, color: p.ink },
+    input: { flex: 1, minHeight: 44, ...F.body, fontSize: 17, color: p.muted, textAlign: 'right' },
+    avatar: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+    avatarText: { ...F.bodySemibold, fontSize: 24, color: '#FFFFFF' },
+    swatch: { width: 22, height: 22, borderRadius: 11 },
   });
