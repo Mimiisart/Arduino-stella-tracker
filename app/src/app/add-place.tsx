@@ -15,8 +15,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Icon, ScreenHeader, T, type IconName } from '@/components/minitag/ui';
-import { F, R } from '@/constants/minitag';
+import { Button, Icon, CancelButton, T, type IconName, SheetHeader } from '@/components/minitag/ui';
+import { F } from '@/constants/minitag';
 import { useAppData } from '@/features/app-data';
 import type { LatLon, PlaceKind } from '@/features/geo';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
@@ -77,7 +77,7 @@ export default function AddPlaceScreen() {
         style={{ backgroundColor: p.ground }}
         contentContainerStyle={[s.page, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled">
-        <ScreenHeader title="Add a place" backLabel="Cancel" chevron={false} onBack={() => router.back()} />
+        <SheetHeader title="Add Place" left={<CancelButton onPress={() => router.back()} />} />
 
         <View style={s.mapBox}>
           {spot && Platform.OS === 'ios' ? (
@@ -104,7 +104,7 @@ export default function AddPlaceScreen() {
                 {locating
                   ? 'Finding where you are…'
                   : locationPermission === 'denied'
-                    ? 'Location is off for MiniTag. Turn it on to save places.'
+                    ? 'Location is off for MiTag. Turn it on to save places.'
                     : "Couldn't find your location. Step outside or near a window and try again."}
               </T>
               {!locating && (
@@ -161,7 +161,7 @@ export default function AddPlaceScreen() {
           />
         </View>
 
-        <Text style={s.label}>What should MiniTag do here?</Text>
+        <Text style={s.label}>What should MiTag do here?</Text>
         <View accessibilityRole="radiogroup" accessibilityLabel="Place type" style={{ gap: 10 }}>
           <KindOption
             icon="checkmark.shield"
@@ -227,41 +227,40 @@ function KindOption({
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    page: { paddingHorizontal: 20, paddingTop: 12, gap: 14 },
+    page: { paddingHorizontal: 16, paddingTop: 8, gap: 16 },
     mapBox: {
       height: 180,
-      borderRadius: 26,
+      borderRadius: 12,
+      borderCurve: 'continuous',
       overflow: 'hidden',
-      borderWidth: 1,
-      borderColor: p.border,
-      backgroundColor: p.primarySoft,
+      backgroundColor: p.disabledBg,
     },
     mapEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 24 },
-    label: { fontFamily: F.bodySemibold, fontSize: 13, color: p.muted, marginBottom: 6 },
+    label: { ...F.body, fontSize: 13, color: p.muted, textTransform: 'uppercase', marginLeft: 16, marginBottom: 7 },
     input: {
-      minHeight: 52,
-      borderWidth: 1,
-      borderColor: p.inputBorder,
-      borderRadius: R.tile,
+      minHeight: 44,
+      borderRadius: 10,
+      borderCurve: 'continuous',
       paddingHorizontal: 16,
-      fontFamily: F.bodyMedium,
+      ...F.body,
       fontSize: 17,
       color: p.ink,
       backgroundColor: p.surface,
     },
     sizeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-    sizeValue: { fontFamily: F.display, fontSize: 20, color: p.ink },
+    sizeValue: { ...F.bodySemibold, fontSize: 17, color: p.ink },
     kind: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
       minHeight: 62,
-      borderRadius: R.tile,
+      borderRadius: 12,
+      borderCurve: 'continuous',
       borderWidth: 2,
       paddingVertical: 10,
       paddingHorizontal: 14,
     },
     kindIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-    kindTitle: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink },
-    kindBody: { fontFamily: F.body, fontSize: 13, color: p.muted, marginTop: 1 },
+    kindTitle: { ...F.bodySemibold, fontSize: 17, color: p.ink },
+    kindBody: { ...F.body, fontSize: 15, color: p.muted, marginTop: 1 },
   });
