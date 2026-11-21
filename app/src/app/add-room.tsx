@@ -5,7 +5,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { supabase } from '@/backend/supabase';
-import { Button, Icon, ScreenHeader, T } from '@/components/minitag/ui';
+import { Button, Icon, CancelButton, T, SheetHeader } from '@/components/minitag/ui';
 import { F, R } from '@/constants/minitag';
 import { useCampus } from '@/features/campus';
 import { floorName } from '@/features/indoor';
@@ -101,7 +101,7 @@ export default function AddRoomScreen() {
         style={{ backgroundColor: p.ground }}
         contentContainerStyle={[s.page, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled">
-        <ScreenHeader title="Add a room" backLabel="Cancel" chevron={false} onBack={() => router.back()} />
+        <SheetHeader title="Add Room" left={<CancelButton onPress={() => router.back()} />} />
 
         <View style={s.card}>
           <Text style={s.label}>Building</Text>
@@ -188,33 +188,31 @@ export default function AddRoomScreen() {
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    page: { paddingHorizontal: 20, paddingTop: 12, gap: 14 },
-    card: { backgroundColor: p.surface, borderWidth: 1, borderColor: p.border, borderRadius: R.tile, padding: 14, gap: 4 },
-    label: { fontFamily: F.bodySemibold, fontSize: 13, color: p.muted, marginBottom: 2 },
-    value: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink },
-    hint: { fontFamily: F.body, fontSize: 12, color: p.muted, marginTop: 4 },
+    page: { paddingHorizontal: 16, paddingTop: 8, gap: 16 },
+    card: { backgroundColor: p.surface, borderRadius: 12, borderCurve: 'continuous', padding: 16, gap: 4 },
+    label: { ...F.body, fontSize: 13, color: p.muted, textTransform: 'uppercase', marginLeft: 16, marginBottom: 7 },
+    value: { ...F.bodySemibold, fontSize: 17, color: p.ink },
+    hint: { ...F.body, fontSize: 13, color: p.muted, marginTop: 4 },
     stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     stepBtn: {
       width: 44,
       height: 44,
       borderRadius: 22,
-      borderWidth: 1,
-      borderColor: p.border,
+      backgroundColor: p.primarySoft,
       alignItems: 'center',
       justifyContent: 'center',
     },
     input: {
-      minHeight: 52,
-      borderWidth: 1,
-      borderColor: p.inputBorder,
-      borderRadius: R.tile,
+      minHeight: 44,
+      borderRadius: 10,
+      borderCurve: 'continuous',
       paddingHorizontal: 16,
-      fontFamily: F.bodyMedium,
+      ...F.body,
       fontSize: 17,
       color: p.ink,
       backgroundColor: p.surface,
     },
     kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    kind: { borderWidth: 1, borderColor: p.border, borderRadius: R.pill, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center', backgroundColor: p.surface },
-    kindText: { fontFamily: F.bodySemibold, fontSize: 14 },
+    kind: { borderRadius: R.pill, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center', backgroundColor: p.surface },
+    kindText: { ...F.bodySemibold, fontSize: 14 },
   });
