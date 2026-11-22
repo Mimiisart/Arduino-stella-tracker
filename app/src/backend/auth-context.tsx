@@ -11,7 +11,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import { supabase } from './supabase';
 
-export type Profile = { displayName: string; consentedAt: string };
+export type Profile = {
+  displayName: string;
+  consentedAt: string;
+  campusId: number | null;
+};
 
 type AuthValue = {
   ready: boolean; // false until the saved session has been loaded
@@ -20,10 +24,17 @@ type AuthValue = {
   profile: Profile | null;
   /** True for campus admins (may add rooms and places). */
   isAdmin: boolean;
-  signUp: (input: { name: string; email: string; password: string }) => Promise<{ needsConfirmation: boolean }>;
+  signUp: (input: {
+    name: string;
+    email: string;
+    password: string;
+    campusId: number | null;
+  }) => Promise<{ needsConfirmation: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   rename: (name: string) => Promise<void>;
+  /** Save which university the signed-in person is at. */
+  setProfileCampus: (campusId: number) => Promise<void>;
   deleteMyData: () => Promise<void>;
 };
 
@@ -41,7 +52,8 @@ export function friendlyAuthError(err: unknown): string {
     return 'Use a password of at least 6 characters.';
   if (m.includes('invalid') && m.includes('email')) return 'That email address doesn’t look right.';
   if (m.includes('rate limit') || m.includes('too many')) return 'Too many tries. Wait a minute and try again.';
-  if (m.includes('network') || m.includes('fetch')) return 'No internet connection. Check your connection and try again.';
+  if (m.includes('network') || m.includes('fetch'))
+    return 'No internet connection. Check your connection and try again.';
   return msg || 'Something went wrong. Try again.';
 }
 
@@ -50,7 +62,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   // The loaded profile, tagged with whose it is, so a signed-out or different
   // user never sees a stale name.
-  const [loaded, setLoaded] = useState<{ userId: string; profile: Profile | null } | null>(null);
+  const [loaded, setLoaded] = useState<{
+    userId: string;
+    profile: Profile | null;
+  } | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -78,42 +93,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       alive = false;
     };
   }, [userId]);
+  const pendingName = String(session?.user.user_metadata?.display_name ?? '').trim();
+  const pendingCampus = Number(session?.user.user_metadata?.campus_id) || null;
   useEffect(() => {
     if (!userId) return;
     let alive = true;
     (async () => {
-      const { data } = await supabase.from('profiles').select('display_name, consented_at').eq('id', userId).maybeSingle();
+      const { data } = await supabase
+        .from('profiles')
+        .select('display_name, consented_at, campus_id')
+        .eq('id', userId)
+        .maybeSingle();
       let row = data;
       if (!row) {
-        const pending = String(session?.user.user_metadata?.display_name ?? '').trim();
-        if (pending) {
+        if (pendingName) {
           const created = await supabase
             .from('profiles')
-            .insert({ id: userId, display_name: pending })
-            .select('display_name, consented_at')
+            .insert({
+              id: userId,
+              display_name: pendingName,
+              campus_id: pendingCampus,
+            })
+            .select('display_name, consented_at, campus_id')
             .single();
           row = created.data;
         }
       }
-      if (alive) setLoaded({ userId, profile: row ? { displayName: row.display_name, consentedAt: row.consented_at } : null });
+      if (alive)
+        setLoaded({
+          userId,
+          profile: row
+            ? {
+                displayName: row.display_name,
+                consentedAt: row.consented_at,
+                campusId: row.campus_id ?? null,
+              }
+            : null,
+        });
     })();
     return () => {
       alive = false;
     };
-  }, [userId, session?.user.user_metadata?.display_name]);
+  }, [userId, pendingName, pendingCampus]);
 
-  const signUp = useCallback(async ({ name, email, password }: { name: string; email: string; password: string }) => {
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
+  const signUp = useCallback(
+    async ({
+      name,
+      email,
       password,
-      options: { data: { display_name: name.trim() } },
-    });
-    if (error) throw error;
-    return { needsConfirmation: !data.session };
-  }, []);
+      campusId,
+    }: {
+      name: string;
+      email: string;
+      password: string;
+      campusId: number | null;
+    }) => {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { display_name: name.trim(), campus_id: campusId } },
+      });
+      if (error) throw error;
+      return { needsConfirmation: !data.session };
+    },
+    [],
+  );
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
     if (error) throw error;
   }, []);
 
@@ -128,7 +178,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const displayName = name.trim();
       const { error } = await supabase.from('profiles').update({ display_name: displayName }).eq('id', userId);
       if (error) throw error;
-      setLoaded((l) => (l && l.userId === userId && l.profile ? { userId, profile: { ...l.profile, displayName } } : l));
+      setLoaded((l) =>
+        l && l.userId === userId && l.profile ? { userId, profile: { ...l.profile, displayName } } : l,
+      );
+    },
+    [userId],
+  );
+
+  const setProfileCampus = useCallback(
+    async (campusId: number) => {
+      if (!userId) return;
+      const { error } = await supabase.from('profiles').update({ campus_id: campusId }).eq('id', userId);
+      if (error) throw error;
+      setLoaded((l) => (l && l.userId === userId && l.profile ? { userId, profile: { ...l.profile, campusId } } : l));
     },
     [userId],
   );
@@ -151,9 +213,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       rename,
+      setProfileCampus,
       deleteMyData,
     }),
-    [ready, session, profile, isAdmin, signUp, signIn, signOut, rename, deleteMyData],
+    [ready, session, profile, isAdmin, signUp, signIn, signOut, rename, setProfileCampus, deleteMyData],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
