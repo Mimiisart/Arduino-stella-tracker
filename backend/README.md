@@ -48,6 +48,26 @@ How the building, floor and room are worked out: `docs/indoor-location.md`.
 Regenerate the footprints from OpenStreetMap: `tools/osm_to_campus.py`.
 Map data © OpenStreetMap contributors (ODbL).
 
+## More universities (migration 003)
+
+People choose their university at sign-up (and in **Settings → University**);
+the app then downloads only that campus.
+
+1. **New query**: paste `supabase/003_campuses.sql`, **Run**. It creates the
+   `campuses` table (public read, admin write), adds `campus_id` to
+   buildings, campus places and profiles, and puts the existing PAU buildings
+   under PAU.
+2. For each `supabase/seed_<slug>_buildings.sql`, **New query**, paste, **Run**.
+   Each file creates its campus row and loads its buildings.
+
+To add another campus, find its outline way in OpenStreetMap (amenity =
+university), download it with the Overpass query in `tools/osm_to_campus.py`,
+then:
+
+```
+python3 tools/osm_to_campus.py backend/geodata/raw/<slug>_campus_osm.json <slug> "Full name" SHORT "Area, Lagos"
+```
+
 ## Adding the school's campus places
 
 The app downloads `campus_places`, shows each one as a pin on the Map with search,
