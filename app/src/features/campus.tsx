@@ -1,20 +1,34 @@
 /**
- * The shared campus map (a small GIS of the university), from Supabase:
+ * The shared campus map (a small GIS of each university), from Supabase:
+ *   campuses          the universities people can choose (Lagos to start)
  *   campus_buildings  footprints from OpenStreetMap, floor counts
  *   campus_rooms      rooms on each floor
  *   campus_places     other points of interest (gates, car parks ...)
- * All public campus data. Downloaded when the app opens and saved on the phone,
- * so the map, search and room detection keep working offline.
+ * All public data. The chosen campus is downloaded and saved on the phone, so
+ * the map, search and room detection keep working offline.
+ *
+ * Which campus: signed-in people's choice lives in their profile (so it follows
+ * them to a new phone); otherwise it is kept on this phone.
  */
 import Storage from 'expo-sqlite/kv-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
+import { useAuth } from '@/backend/auth-context';
 import { supabase } from '@/backend/supabase';
 import type { IconName } from '@/components/minitag/ui';
 
 import type { LatLon } from './geo';
 import { floorName, polygonCentre, type Building, type PolygonCoords, type Room } from './indoor';
+
+export type Campus = {
+  id: number;
+  slug: string;
+  name: string;
+  shortName: string;
+  area: string | null;
+  centre: LatLon;
+};
 
 export type CampusPlace = LatLon & {
   id: number;
@@ -27,11 +41,19 @@ export type CampusPlace = LatLon & {
 
 type Cache = { places: CampusPlace[]; buildings: Building[]; rooms: Room[]; fetchedAt: number | null };
 
-const CACHE_KEY = 'minitag.campus.v2';
+const CAMPUSES_KEY = 'minitag.campuses';
+const CHOICE_KEY = 'minitag.campus.slug';
+const cacheKey = (slug: string) => `minitag.campus.v3.${slug}`;
+const LEGACY_PAU_CACHE = 'minitag.campus.v2'; // from before there were several campuses
 const REFRESH_EVERY_MS = 6 * 60 * 60_000; // re-check for updates at most every 6 hours
+const PAGE = 1000; // Supabase returns at most 1000 rows per request
 const EMPTY: Cache = { places: [], buildings: [], rooms: [], fetchedAt: null };
 
 type CampusValue = Cache & {
+  campuses: Campus[];
+  /** The campus the person chose, or null if they haven't yet. */
+  campus: Campus | null;
+  selectCampus: (slug: string) => Promise<void>;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -39,14 +61,20 @@ type CampusValue = Cache & {
 
 const CampusContext = createContext<CampusValue | null>(null);
 
-function loadCache(): Cache {
+function readJson<T>(key: string, fallback: T): T {
   try {
-    const raw = Storage.getItemSync(CACHE_KEY);
-    const v = raw ? (JSON.parse(raw) as Cache) : null;
-    return v && Array.isArray(v.buildings) ? v : EMPTY;
+    const raw = Storage.getItemSync(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
-    return EMPTY;
+    return fallback;
   }
+}
+
+function initialChoice(): string | null {
+  const saved = Storage.getItemSync(CHOICE_KEY);
+  if (saved) return saved;
+  // People who used MiniTag before campuses existed were all at PAU.
+  return Storage.getItemSync(LEGACY_PAU_CACHE) ? 'pau' : null;
 }
 
 const coords = (geo: unknown): PolygonCoords | null => {
@@ -54,57 +82,151 @@ const coords = (geo: unknown): PolygonCoords | null => {
   return g && g.type === 'Polygon' && Array.isArray(g.coordinates) ? g.coordinates : null;
 };
 
+/** Fetch every row of a query, 1000 at a time. */
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>) {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
+
+async function fetchCampusData(campusId: number): Promise<Cache> {
+  const [places, buildings, rooms] = await Promise.all([
+    fetchAll((a, b) =>
+      supabase
+        .from('campus_places')
+        .select('id, name, category, description, latitude, longitude, radius_m, verified')
+        .eq('campus_id', campusId)
+        .order('id')
+        .range(a, b),
+    ),
+    fetchAll((a, b) =>
+      supabase
+        .from('campus_buildings')
+        .select('id, name, category, levels, floor_height_m, footprint')
+        .eq('campus_id', campusId)
+        .order('id')
+        .range(a, b),
+    ),
+    fetchAll((a, b) =>
+      supabase
+        .from('campus_rooms')
+        .select('id, building_id, name, floor, kind, latitude, longitude, footprint, campus_buildings!inner(campus_id)')
+        .eq('campus_buildings.campus_id', campusId)
+        .order('id')
+        .range(a, b),
+    ),
+  ]);
+  return {
+    fetchedAt: Date.now(),
+    places: places.map((r) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      description: r.description,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      radius: r.radius_m,
+      verified: r.verified,
+    })),
+    buildings: buildings.flatMap((r) => {
+      const footprint = coords(r.footprint);
+      return footprint
+        ? [{ id: r.id, name: r.name, category: r.category, levels: r.levels, floorHeight: r.floor_height_m, footprint }]
+        : [];
+    }),
+    rooms: rooms.flatMap((r) => {
+      const footprint = coords(r.footprint);
+      const centre =
+        r.latitude != null && r.longitude != null
+          ? { latitude: r.latitude, longitude: r.longitude }
+          : footprint
+            ? polygonCentre(footprint)
+            : null;
+      return centre ? [{ id: r.id, buildingId: r.building_id, name: r.name, floor: r.floor, kind: r.kind, footprint, ...centre }] : [];
+    }),
+  };
+}
+
 export function CampusProvider({ children }: { children: ReactNode }) {
-  const [cache, setCache] = useState<Cache>(loadCache);
+  const auth = useAuth();
+  const [campuses, setCampuses] = useState<Campus[]>(() => readJson<Campus[]>(CAMPUSES_KEY, []));
+  const [localChoice, setLocalChoice] = useState<string | null>(initialChoice);
+  // Downloaded data, tagged with its campus so switching never shows the old one.
+  const [loaded, setLoaded] = useState<{ slug: string; data: Cache } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    const [placesRes, buildingsRes, roomsRes] = await Promise.all([
-      supabase.from('campus_places').select('id, name, category, description, latitude, longitude, radius_m, verified').order('name'),
-      supabase.from('campus_buildings').select('id, name, category, levels, floor_height_m, footprint'),
-      supabase.from('campus_rooms').select('id, building_id, name, floor, kind, latitude, longitude, footprint').order('floor'),
-    ]);
-    setLoading(false);
-    if (placesRes.error && buildingsRes.error) {
-      setError('Couldn’t update the campus map. Showing the saved copy.');
-      return;
-    }
-    const next: Cache = {
-      fetchedAt: Date.now(),
-      places: (placesRes.data ?? []).map((r) => ({
-        id: r.id,
-        name: r.name,
-        category: r.category,
-        description: r.description,
-        latitude: r.latitude,
-        longitude: r.longitude,
-        radius: r.radius_m,
-        verified: r.verified,
-      })),
-      buildings: (buildingsRes.data ?? []).flatMap((r) => {
-        const footprint = coords(r.footprint);
-        return footprint
-          ? [{ id: r.id, name: r.name, category: r.category, levels: r.levels, floorHeight: r.floor_height_m, footprint }]
-          : [];
-      }),
-      rooms: (roomsRes.data ?? []).flatMap((r) => {
-        const footprint = coords(r.footprint);
-        const centre = r.latitude != null && r.longitude != null ? { latitude: r.latitude, longitude: r.longitude } : footprint ? polygonCentre(footprint) : null;
-        return centre ? [{ id: r.id, buildingId: r.building_id, name: r.name, floor: r.floor, kind: r.kind, footprint, ...centre }] : [];
-      }),
-    };
-    setError(null);
-    setCache(next);
-    try {
-      Storage.setItemSync(CACHE_KEY, JSON.stringify(next));
-    } catch {
-      // Still shown this session.
-    }
+  // A signed-in person's profile choice wins over this phone's.
+  const profileSlug = campuses.find((c) => c.id === auth.profile?.campusId)?.slug ?? null;
+  const slug = profileSlug ?? localChoice;
+  const campus = campuses.find((c) => c.slug === slug) ?? null;
+  const saved = useMemo(() => (slug ? readJson<Cache>(cacheKey(slug), EMPTY) : EMPTY), [slug]);
+  const data = loaded && loaded.slug === slug ? loaded.data : saved;
+
+  const loadCampuses = useCallback(async () => {
+    const { data: rows, error: err } = await supabase
+      .from('campuses')
+      .select('id, slug, name, short_name, area, centre_lat, centre_lon')
+      .order('name');
+    if (err || !rows) return null;
+    const list: Campus[] = rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      name: r.name,
+      shortName: r.short_name,
+      area: r.area,
+      centre: { latitude: r.centre_lat, longitude: r.centre_lon },
+    }));
+    setCampuses(list);
+    Storage.setItemSync(CAMPUSES_KEY, JSON.stringify(list));
+    return list;
   }, []);
 
-  // Fetch on launch, and when the app comes back after a while.
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = (await loadCampuses()) ?? campuses;
+      const target = list.find((c) => c.slug === slug);
+      if (!target) return;
+      const next = await fetchCampusData(target.id);
+      setLoaded({ slug: target.slug, data: next });
+      setError(null);
+      try {
+        Storage.setItemSync(cacheKey(target.slug), JSON.stringify(next));
+      } catch {
+        // Still shown this session.
+      }
+    } catch {
+      setError('Couldn’t update the campus map. Showing the saved copy.');
+    } finally {
+      setLoading(false);
+    }
+  }, [loadCampuses, campuses, slug]);
+
+  const { session, setProfileCampus } = auth;
+  const selectCampus = useCallback(
+    async (next: string) => {
+      Storage.setItemSync(CHOICE_KEY, next);
+      setLocalChoice(next);
+      const c = campuses.find((x) => x.slug === next);
+      if (session && c) await setProfileCampus(c.id).catch(() => {});
+    },
+    [campuses, session, setProfileCampus],
+  );
+
+  // Accounts made before campuses existed have none: give them this phone's choice.
+  const profileCampus = auth.profile ? auth.profile.campusId : undefined;
+  useEffect(() => {
+    if (profileCampus !== null || !localChoice) return;
+    const c = campuses.find((x) => x.slug === localChoice);
+    if (c) setProfileCampus(c.id).catch(() => {});
+  }, [profileCampus, localChoice, campuses, setProfileCampus]);
+
+  // Fetch on launch, when the campus changes, and when the app comes back after a while.
   useEffect(() => {
     let last = 0;
     const maybe = () => {
@@ -113,11 +235,16 @@ export function CampusProvider({ children }: { children: ReactNode }) {
       refresh();
     };
     maybe();
-    const sub = AppState.addEventListener('change', (s) => s === 'active' && maybe());
+    const sub = AppState.addEventListener('change', (st) => st === 'active' && maybe());
     return () => sub.remove();
-  }, [refresh]);
+    // Re-run only when the chosen campus changes, not on every refresh identity change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
-  const value = useMemo<CampusValue>(() => ({ ...cache, loading, error, refresh }), [cache, loading, error, refresh]);
+  const value = useMemo<CampusValue>(
+    () => ({ ...data, campuses, campus, selectCampus, loading, error, refresh }),
+    [data, campuses, campus, selectCampus, loading, error, refresh],
+  );
   return <CampusContext.Provider value={value}>{children}</CampusContext.Provider>;
 }
 
