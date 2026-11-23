@@ -4,8 +4,9 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { friendlyAuthError, useAuth } from '@/backend/auth-context';
-import { Button, Icon, ScreenHeader, T } from '@/components/minitag/ui';
-import { F, R } from '@/constants/minitag';
+import { Button, Icon, CancelButton, Row, Section, T, SheetHeader } from '@/components/minitag/ui';
+import { useCampus } from '@/features/campus';
+import { F } from '@/constants/minitag';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
 import type { Palette } from '@/theme/themes';
 
@@ -17,6 +18,7 @@ export default function AccountScreen() {
   const s = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const auth = useAuth();
+  const campus = useCampus();
   const params = useLocalSearchParams<{ mode?: string }>();
   const [mode, setMode] = useState<Mode>(params.mode === 'signin' ? 'signin' : 'signup');
   const [name, setName] = useState('');
@@ -31,33 +33,45 @@ export default function AccountScreen() {
   const signup = mode === 'signup';
   const emailOk = /^\S+@\S+\.\S+$/.test(email.trim());
   const canSubmit = signup
-    ? name.trim().length > 0 && emailOk && password.length >= 6 && consent
+    ? name.trim().length > 0 && !!campus.campus && emailOk && password.length >= 6 && consent
     : emailOk && password.length > 0;
 
   const submit = async () => {
     setError(null);
     if (!canSubmit) {
       setError(
-        signup && !consent
-          ? 'Tick the box to agree to the privacy notice.'
-          : !emailOk
-            ? 'Enter a valid email address.'
-            : signup && password.length < 6
-              ? 'Use a password of at least 6 characters.'
-              : 'Fill in every field.',
+        signup && !campus.campus
+          ? 'Choose your university.'
+          : signup && !consent
+            ? 'Tick the box to agree to the privacy notice.'
+            : !emailOk
+              ? 'Enter a valid email address.'
+              : signup && password.length < 6
+                ? 'Use a password of at least 6 characters.'
+                : 'Fill in every field.',
       );
       return;
     }
     setBusy(true);
     try {
       if (signup) {
-        const { needsConfirmation } = await auth.signUp({ name, email, password });
+        const { needsConfirmation } = await auth.signUp({
+          name,
+          email,
+          password,
+          campusId: campus.campus?.id ?? null,
+        });
         if (needsConfirmation) {
           setConfirmSentTo(email.trim());
           return;
         }
       } else {
         await auth.signIn(email, password);
+        // Their saved university loads with their profile; ask only if there is none anywhere.
+        if (!campus.campus) {
+          router.replace('/choose-campus');
+          return;
+        }
       }
       router.back();
     } catch (e) {
@@ -74,7 +88,15 @@ export default function AccountScreen() {
 
   if (confirmSentTo) {
     return (
-      <View style={[s.page, { flex: 1, paddingBottom: insets.bottom + 24, justifyContent: 'center' }]}>
+      <View
+        style={[
+          s.page,
+          {
+            flex: 1,
+            paddingBottom: insets.bottom + 24,
+            justifyContent: 'center',
+          },
+        ]}>
         <View style={s.mailIcon}>
           <Icon name="envelope.badge" size={36} color={p.link} />
         </View>
@@ -102,13 +124,13 @@ export default function AccountScreen() {
         style={{ backgroundColor: p.ground }}
         contentContainerStyle={[s.page, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled">
-        <ScreenHeader title="Account" backLabel="Cancel" chevron={false} onBack={() => router.back()} />
+        <SheetHeader title="Account" left={<CancelButton onPress={() => router.back()} />} />
 
         <View>
           <T variant="title">{signup ? 'Create your account' : 'Welcome back'}</T>
           <T variant="body" style={{ color: p.muted, marginTop: 8 }}>
             {signup
-              ? 'An account lets other MiniTag users help find your tag. Beeping and alerts work without one.'
+              ? 'An account lets other MiTag users help find your tag. Beeping and alerts work without one.'
               : 'Sign in with the email and password you used before.'}
           </T>
         </View>
@@ -130,6 +152,17 @@ export default function AccountScreen() {
             );
           })}
         </View>
+
+        {signup && (
+          <Section header="University" style={{ marginBottom: 0 }}>
+            <Row
+              icon="building.columns.fill"
+              title={campus.campus?.name ?? 'Choose Your University'}
+              subtitle={campus.campus ? (campus.campus.area ?? undefined) : 'Needed for your campus map'}
+              onPress={() => router.push('/choose-campus')}
+            />
+          </Section>
+        )}
 
         {signup && (
           <Field label="Your name" nativeID="nameLabel">
@@ -212,10 +245,19 @@ export default function AccountScreen() {
               accessibilityState={{ checked: consent }}
               onPress={() => setConsent((v) => !v)}
               style={s.consentRow}>
-              <View style={[s.checkbox, consent && { backgroundColor: p.primary, borderColor: p.primary }]}>
+              <View
+                style={[
+                  s.checkbox,
+                  consent && {
+                    backgroundColor: p.primary,
+                    borderColor: p.primary,
+                  },
+                ]}>
                 {consent && <Icon name="checkmark" size={13} color={p.onPrimary} weight="heavy" />}
               </View>
-              <Text style={s.consentText}>I’ve read the privacy notice and agree to MiniTag storing my name and email.</Text>
+              <Text style={s.consentText}>
+                I’ve read the privacy notice and agree to MiTag storing my name and email.
+              </Text>
             </Pressable>
           </>
         )}
@@ -246,36 +288,66 @@ function Field({ label, nativeID, children }: { label: string; nativeID: string;
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    page: { paddingHorizontal: 20, paddingTop: 12, gap: 14 },
+    page: { paddingHorizontal: 16, paddingTop: 8, gap: 16 },
     segment: {
       flexDirection: 'row',
       gap: 4,
-      backgroundColor: p.surface,
-      borderWidth: 1,
-      borderColor: p.border,
-      borderRadius: 16,
-      padding: 4,
+      backgroundColor: p.disabledBg,
+      borderRadius: 9,
+      padding: 2,
     },
-    segmentItem: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-    segmentText: { fontFamily: F.bodySemibold, fontSize: 15 },
-    label: { fontFamily: F.bodySemibold, fontSize: 13, color: p.muted, marginBottom: 6 },
+    segmentItem: {
+      flex: 1,
+      minHeight: 32,
+      borderRadius: 7,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    segmentText: { ...F.bodySemibold, fontSize: 13 },
+    label: {
+      ...F.body,
+      fontSize: 13,
+      color: p.muted,
+      textTransform: 'uppercase',
+      marginLeft: 16,
+      marginBottom: 7,
+    },
     input: {
-      minHeight: 52,
-      borderWidth: 1,
-      borderColor: p.inputBorder,
-      borderRadius: R.tile,
+      minHeight: 44,
+      borderRadius: 10,
+      borderCurve: 'continuous',
       paddingHorizontal: 16,
-      fontFamily: F.bodyMedium,
+      ...F.body,
       fontSize: 17,
       color: p.ink,
       backgroundColor: p.surface,
     },
-    eye: { position: 'absolute', right: 8, top: 0, bottom: 0, width: 44, alignItems: 'center', justifyContent: 'center' },
-    notice: { backgroundColor: p.primarySoft, borderRadius: 16, padding: 14, gap: 6 },
-    noticeTitle: { fontFamily: F.bodySemibold, fontSize: 14, color: p.ink },
-    noticeBody: { fontFamily: F.body, fontSize: 13, lineHeight: 20, color: p.ink },
-    noticeStrong: { fontFamily: F.bodySemibold },
-    consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, minHeight: 44, paddingVertical: 4 },
+    eye: {
+      position: 'absolute',
+      right: 8,
+      top: 0,
+      bottom: 0,
+      width: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    notice: {
+      backgroundColor: p.surface,
+      borderRadius: 12,
+      borderCurve: 'continuous',
+      padding: 16,
+      gap: 6,
+    },
+    noticeTitle: { ...F.bodySemibold, fontSize: 15, color: p.ink },
+    noticeBody: { ...F.body, fontSize: 15, lineHeight: 20, color: p.muted },
+    noticeStrong: { ...F.bodySemibold },
+    consentRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+      minHeight: 44,
+      paddingVertical: 4,
+    },
     checkbox: {
       width: 24,
       height: 24,
@@ -287,7 +359,13 @@ const makeStyles = (p: Palette) =>
       justifyContent: 'center',
       marginTop: 1,
     },
-    consentText: { fontFamily: F.body, fontSize: 14, lineHeight: 20, color: p.ink, flex: 1 },
+    consentText: {
+      ...F.body,
+      fontSize: 15,
+      lineHeight: 20,
+      color: p.ink,
+      flex: 1,
+    },
     mailIcon: {
       alignSelf: 'center',
       width: 80,
