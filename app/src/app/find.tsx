@@ -9,7 +9,7 @@ import { FIND_DEFAULT_SECONDS } from '@/ble/protocol';
 import { Button, Icon, Radar, T } from '@/components/minitag/ui';
 import { F } from '@/constants/minitag';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
-import { STATUS, type Palette } from '@/theme/themes';
+import { type Palette } from '@/theme/themes';
 
 /**
  * Find My ID: sends FIND when opened. While the tag beeps the whole screen
@@ -73,8 +73,11 @@ export default function FindScreen() {
   const fg = on ? p.onPrimary : p.ink;
   const sub = on ? p.onPrimaryMuted : p.muted;
 
-  const headline = !connected ? 'Not connected' : on ? `${name} is beeping` : endedBy ? 'Stopped. Found it?' : 'Ready to beep';
-  const detail = !connected
+  const noTracker = !tag.tracker;
+  const headline = noTracker ? 'Set up MiniTag first' : !connected ? 'Not connected' : on ? `${name} is beeping` : endedBy ? 'Stopped. Found it?' : 'Ready to beep';
+  const detail = noTracker
+    ? 'Pair the MiniTag on your ID-card holder. Then this screen makes it beep so you can follow the sound.'
+    : !connected
     ? 'Move closer to where you last had it. MiniTag reconnects by itself.'
     : on
       ? 'Follow the sound. Press the button on the tag, or tap Stop, when you find it.'
@@ -86,7 +89,7 @@ export default function FindScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: on ? p.primary : p.ground, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 20 }]}>
-      <StatusBar style={on ? 'light' : 'dark'} />
+      <StatusBar style={on || p.mode === 'dark' ? 'light' : 'dark'} />
 
       <View style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to Home" onPress={() => router.back()} hitSlop={8} style={styles.back}>
@@ -125,7 +128,7 @@ export default function FindScreen() {
       </View>
 
       {error && (
-        <T variant="body" style={[styles.centerText, { color: on ? p.accent : STATUS.dangerInk, marginBottom: 12 }]} accessibilityLiveRegion="assertive">
+        <T variant="body" style={[styles.centerText, { color: on ? p.accent : p.dangerInk, marginBottom: 12 }]} accessibilityLiveRegion="assertive">
           {error}
         </T>
       )}
@@ -137,11 +140,28 @@ export default function FindScreen() {
             The tag stops by itself after {FIND_DEFAULT_SECONDS} seconds.
           </T>
         </View>
+      ) : noTracker ? (
+        <View style={{ gap: 10 }}>
+          <Button title="Set up MiniTag" onPress={() => router.replace('/pair')} />
+          <Button title="Not now" variant="outline" onPress={() => router.back()} />
+        </View>
       ) : (
         <View style={{ gap: 10 }}>
           <Button title="Beep again" icon="speaker.wave.2.fill" loading={busy} disabled={!connected} onPress={() => run('FIND')} />
           <Button title="Done" variant="outline" onPress={() => router.back()} />
         </View>
+      )}
+
+      {!noTracker && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/precision')}
+          style={({ pressed }) => [styles.precisionLink, pressed && { opacity: 0.7 }]}>
+          <Text style={[styles.headerText, { fontSize: 15, color: on ? p.accent : p.link }]}>
+            Can&apos;t hear it? Try Precision Find
+          </Text>
+          <Icon name="chevron.right" size={14} color={on ? p.accent : p.link} weight="semibold" />
+        </Pressable>
       )}
     </View>
   );
@@ -158,4 +178,5 @@ const makeStyles = (p: Palette) =>
   coreGlow: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 14 } },
   centerText: { textAlign: 'center' },
   detail: { marginTop: 10, maxWidth: 310 },
+  precisionLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44, marginTop: 6 },
 });

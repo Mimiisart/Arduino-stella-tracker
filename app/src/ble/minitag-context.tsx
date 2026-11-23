@@ -14,6 +14,8 @@ import { ClientState, FoundDevice, MiniTagClient } from './minitag-client';
 import { Command, TagEvent } from './protocol';
 
 const TRACKER_KEY = 'minitag.tracker';
+/** Set by the Welcome screen once permissions have been explained. */
+export const ONBOARDED_KEY = 'minitag.onboarded';
 const LAST_CONNECTED_KEY = 'minitag.lastConnectedAt';
 
 export type SavedTracker = { id: string; name: string };
@@ -25,6 +27,8 @@ type MiniTagContextValue = ClientState & {
   rename: (name: string) => void;
   forget: () => Promise<void>;
   send: (command: Command, seconds?: number) => Promise<TagEvent>;
+  /** Start Bluetooth (shows iOS's permission prompt the first time). */
+  startBluetooth: () => void;
 };
 
 const MiniTagContext = createContext<MiniTagContextValue | null>(null);
@@ -57,9 +61,11 @@ export function MiniTagProvider({ children }: { children: ReactNode }) {
     return raw ? Number(raw) : null;
   });
 
-  // Reconnect to the saved tracker on launch.
+  // Reconnect to the saved tracker on launch. Bluetooth starts here only for
+  // people who have been through Welcome, so iOS never asks before we explain.
   useEffect(() => {
     if (tracker && client.state.deviceId !== tracker.id) client.resume(tracker.id);
+    else if (Storage.getItemSync(ONBOARDED_KEY)) client.start();
     // Only on first mount; pair()/forget() handle later changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -105,6 +111,7 @@ export function MiniTagProvider({ children }: { children: ReactNode }) {
       rename,
       forget,
       send: (command, seconds) => client.send(command, seconds),
+      startBluetooth: () => client.start(),
     }),
     [state, tracker, storedLastConnected, client, pair, rename, forget],
   );

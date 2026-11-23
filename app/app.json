@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "minitag",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "edu.minitag.app",
@@ -47,7 +47,20 @@
           "bluetoothAlwaysPermission": "MiniTag uses Bluetooth to connect to your ID-card tracker, make it beep, and warn you if you leave it behind."
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "MiniTag saves where your phone was when your ID tag disconnects, so you can see where you last had it."
+        }
+      ],
+      "expo-maps",
+      [
+        "expo-notifications",
+        {
+          "enableRemoteNotifications": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

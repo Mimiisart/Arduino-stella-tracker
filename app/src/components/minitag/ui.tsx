@@ -24,7 +24,7 @@ import Animated, {
 import type { BatteryLevel } from '@/ble/protocol';
 import { F, R } from '@/constants/minitag';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
-import { STATUS, type Palette } from '@/theme/themes';
+import { type Palette } from '@/theme/themes';
 
 // ---- Text --------------------------------------------------------------------
 
@@ -80,7 +80,7 @@ export function IconTile({ name, size = 40 }: { name: IconName; size?: number })
   const p = usePalette();
   return (
     <View style={[shared.center, { width: size, height: size, borderRadius: R.iconTile, backgroundColor: p.primarySoft }]}>
-      <Icon name={name} size={size * 0.52} color={p.primary} />
+      <Icon name={name} size={size * 0.52} color={p.link} />
     </View>
   );
 }
@@ -117,7 +117,7 @@ export function Chip({ label, dot, tone = 'onPrimary' }: { label: string; dot: s
   return (
     <View style={[shared.chip, { backgroundColor: onPrimary ? p.primaryChip : p.primarySoft }]}>
       <View style={[shared.chipDot, { backgroundColor: dot }]} />
-      <Text style={[shared.chipText, { color: onPrimary ? p.onPrimaryMuted : p.primary }]}>{label}</Text>
+      <Text style={[shared.chipText, { color: onPrimary ? p.onPrimaryMuted : p.link }]}>{label}</Text>
     </View>
   );
 }
@@ -131,13 +131,13 @@ function buttonColors(p: Palette, v: ButtonVariant) {
     case 'primary':
       return { bg: p.primary, fg: p.onPrimary, border: p.primary, icon: p.accent };
     case 'accent':
-      return { bg: p.accent, fg: p.ink, border: p.accent, icon: p.ink };
+      return { bg: p.accent, fg: p.onAccent, border: p.accent, icon: p.onAccent };
     case 'outline':
-      return { bg: p.surface, fg: p.ink, border: p.border, icon: p.primary };
+      return { bg: p.surface, fg: p.ink, border: p.border, icon: p.link };
     case 'ghost':
-      return { bg: 'transparent', fg: p.primary, border: 'transparent', icon: p.primary };
+      return { bg: 'transparent', fg: p.link, border: 'transparent', icon: p.link };
     case 'remove':
-      return { bg: p.surface, fg: STATUS.garnet, border: STATUS.removeBorder, icon: STATUS.garnet };
+      return { bg: p.surface, fg: p.garnet, border: p.removeBorder, icon: p.garnet };
   }
 }
 
@@ -217,7 +217,7 @@ export const BATTERY_LABEL: Record<BatteryLevel, string> = {
 export function BatteryBars({ level }: { level: BatteryLevel }) {
   const p = usePalette();
   const filled = level === 'good' || level === 'usb' ? 3 : level === 'low' ? 2 : level === 'replace' ? 1 : 0;
-  const color = level === 'replace' ? STATUS.garnet : level === 'low' ? STATUS.amber : STATUS.sage;
+  const color = level === 'replace' ? p.garnet : level === 'low' ? p.amber : p.sage;
   return (
     <View style={shared.bars}>
       {[0, 1, 2].map((i) => (
@@ -362,4 +362,117 @@ const shared = StyleSheet.create({
   bars: { flexDirection: 'row', gap: 3 },
   bar: { width: 6, height: 14, borderRadius: 2 },
   ring: { borderRadius: 9999 },
+});
+
+// ---- Screen header -------------------------------------------------------------
+
+/** "‹ Home    Title    " row used at the top of pushed and modal screens. */
+export function ScreenHeader({
+  title,
+  backLabel,
+  onBack,
+  chevron = true,
+  color,
+  right,
+}: {
+  title: string;
+  backLabel: string;
+  onBack: () => void;
+  chevron?: boolean;
+  color?: string;
+  right?: ReactNode;
+}) {
+  const p = usePalette();
+  const c = color ?? p.link;
+  return (
+    <View style={header.row}>
+      <Pressable accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} hitSlop={8} style={header.side}>
+        {chevron && <Icon name="chevron.left" size={17} color={c} weight="semibold" />}
+        <Text style={[header.link, { color: c }]}>{backLabel}</Text>
+      </Pressable>
+      <Text style={[header.title, { color: color ?? p.ink }]} accessibilityRole="header" numberOfLines={1}>
+        {title}
+      </Text>
+      <View style={[header.side, { justifyContent: 'flex-end' }]}>{right}</View>
+    </View>
+  );
+}
+
+const header = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
+  side: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 80, minHeight: 44 },
+  link: { fontFamily: F.bodySemibold, fontSize: 16 },
+  title: { fontFamily: F.bodySemibold, fontSize: 16, flexShrink: 1, textAlign: 'center' },
+});
+
+/** A switch styled like the design (wine track, white knob). */
+export function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
+  const p = usePalette();
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel={label}
+      onPress={() => onChange(!value)}
+      hitSlop={6}
+      style={[toggle.track, { backgroundColor: value ? p.primary : p.idle }]}>
+      <View style={[toggle.knob, { left: value ? 23 : 3 }]} />
+    </Pressable>
+  );
+}
+
+const toggle = StyleSheet.create({
+  track: { width: 52, height: 32, borderRadius: 16 },
+  knob: { position: 'absolute', top: 3, width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff' },
+});
+
+/** Tappable row with a soft icon tile, title, subtitle and chevron. */
+export function LinkRow({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  accessibilityHint,
+}: {
+  icon: IconName;
+  title: string;
+  subtitle?: string;
+  onPress: () => void;
+  accessibilityHint?: string;
+}) {
+  const p = usePalette();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
+      accessibilityHint={accessibilityHint}
+      onPress={onPress}
+      style={({ pressed }) => [
+        linkRow.row,
+        { backgroundColor: p.surface, borderColor: p.border },
+        pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] },
+      ]}>
+      <IconTile name={icon} />
+      <View style={{ flex: 1 }}>
+        <Text style={[linkRow.title, { color: p.ink }]}>{title}</Text>
+        {subtitle && <Text style={[linkRow.sub, { color: p.muted }]}>{subtitle}</Text>}
+      </View>
+      <Icon name="chevron.right" size={15} color={p.muted} weight="semibold" />
+    </Pressable>
+  );
+}
+
+const linkRow = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: R.card,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minHeight: 64,
+  },
+  title: { fontFamily: F.bodySemibold, fontSize: 15 },
+  sub: { fontFamily: F.body, fontSize: 13, marginTop: 2 },
 });

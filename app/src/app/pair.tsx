@@ -18,7 +18,7 @@ import { useMiniTag } from '@/ble/minitag-context';
 import { Button, Icon, IconTile, Radar, T } from '@/components/minitag/ui';
 import { F, R } from '@/constants/minitag';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
-import { STATUS, type Palette } from '@/theme/themes';
+import { type Palette } from '@/theme/themes';
 
 export default function PairScreen() {
   const p = usePalette();
@@ -49,6 +49,10 @@ export default function PairScreen() {
       () => setScanRunning(false),
     );
   }, [scan]);
+
+  // Pairing needs Bluetooth, so start it if Welcome was skipped.
+  const { startBluetooth } = tag;
+  useEffect(() => startBluetooth(), [startBluetooth]);
 
   // Scan as soon as Bluetooth is ready; stop when leaving the screen.
   useEffect(() => {
@@ -117,7 +121,7 @@ export default function PairScreen() {
 
         {btProblem ? (
           <View style={styles.problem}>
-            <T variant="bodyStrong" style={{ fontSize: 15, color: STATUS.dangerInk }}>
+            <T variant="bodyStrong" style={{ fontSize: 15, color: p.dangerInk }}>
               {btProblem}
             </T>
             {tag.bluetooth === 'unauthorized' && (
@@ -169,6 +173,7 @@ export default function PairScreen() {
             onChangeText={setName}
             placeholder="School ID"
             placeholderTextColor={p.muted}
+            keyboardAppearance={p.mode}
             maxLength={30}
             returnKeyType="done"
             accessibilityLabelledBy="tagNameLabel"
@@ -178,7 +183,7 @@ export default function PairScreen() {
         </View>
 
         {error && (
-          <T variant="body" style={{ color: STATUS.dangerInk }} accessibilityLiveRegion="assertive">
+          <T variant="body" style={{ color: p.dangerInk }} accessibilityLiveRegion="assertive">
             {error}
           </T>
         )}
@@ -203,7 +208,7 @@ const makeStyles = (p: Palette) =>
   page: { paddingHorizontal: 20, paddingTop: 12, gap: 16 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   headerSide: { width: 64, minHeight: 44, justifyContent: 'center' },
-  headerLink: { fontFamily: F.bodySemibold, fontSize: 16, color: p.primary },
+  headerLink: { fontFamily: F.bodySemibold, fontSize: 16, color: p.link },
   headerTitle: { fontFamily: F.bodySemibold, fontSize: 16, color: p.ink },
   radarCard: {
     backgroundColor: p.primary,
@@ -241,8 +246,8 @@ const makeStyles = (p: Palette) =>
     paddingHorizontal: 16,
   },
   problem: {
-    backgroundColor: STATUS.dangerBg,
-    borderColor: STATUS.dangerBorder,
+    backgroundColor: p.dangerBg,
+    borderColor: p.dangerBorder,
     borderWidth: 1,
     borderRadius: 22,
     padding: 16,
@@ -260,7 +265,7 @@ const makeStyles = (p: Palette) =>
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
-  deviceRowSelected: { borderColor: p.primary },
+  deviceRowSelected: { borderColor: p.link },
   check: {
     width: 24,
     height: 24,

@@ -61,7 +61,7 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const REPLY_TIMEOUT_MS = 4_000;
 
 export class MiniTagClient {
-  private manager: BleManager;
+  private _manager: BleManager | null = null;
   private listeners = new Set<(s: ClientState) => void>();
   private subscriptions: Subscription[] = [];
   private disconnectSub: Subscription | null = null;
@@ -78,8 +78,19 @@ export class MiniTagClient {
     lastDisconnectedAt: null,
   };
 
-  constructor() {
-    this.manager = new BleManager({
+  /** True once Bluetooth has been started (and iOS has asked for permission). */
+  get started(): boolean {
+    return this._manager !== null;
+  }
+
+  /**
+   * Start Bluetooth. Creating the manager is what makes iOS show its Bluetooth
+   * permission prompt, so this waits until the Welcome screen has explained why
+   * (or until a paired tracker needs reconnecting). Any use of `manager` calls it.
+   */
+  start(): BleManager {
+    if (this._manager) return this._manager;
+    const manager = new BleManager({
       // Lets iOS relaunch the app in the background for BLE events
       // (needed later for leave-behind alerts).
       restoreStateIdentifier: 'minitag-central',
@@ -93,12 +104,19 @@ export class MiniTagClient {
       },
     });
 
-    this.manager.onStateChange((s) => {
+    this._manager = manager;
+
+    manager.onStateChange((s) => {
       this.set({ bluetooth: mapBleState(s) });
       if (s === BleState.PoweredOn && this.wantConnected && this.state.connection !== 'connected') {
         this.reconnect();
       }
     }, true);
+    return manager;
+  }
+
+  private get manager(): BleManager {
+    return this.start();
   }
 
   // ---- subscription -------------------------------------------------------
@@ -162,6 +180,7 @@ export class MiniTagClient {
   resume(deviceId: string) {
     this.wantConnected = true;
     this.set({ deviceId });
+    this.start(); // reconnects once Bluetooth reports it is on
     if (this.state.bluetooth === 'on') this.reconnect();
   }
 

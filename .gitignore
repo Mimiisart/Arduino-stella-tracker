@@ -11,3 +11,4 @@ firmware/**/build/
 # Expo generated native projects (Continuous Native Generation)
 app/ios/
 app/android/
+.venv-book/
