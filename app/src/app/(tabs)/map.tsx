@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/backend/auth-context';
 import { useMiniTag } from '@/ble/minitag-context';
 import { Button, Icon, T, formatWhen } from '@/components/minitag/ui';
-import { F, R } from '@/constants/minitag';
+import { F } from '@/constants/minitag';
 import { useAppData } from '@/features/app-data';
 import { campusIcon, searchCampus, useCampus, type SearchHit } from '@/features/campus';
 import type { LatLon } from '@/features/geo';
@@ -46,8 +46,18 @@ export default function MapScreen() {
     if (!last && data.locationPermission === 'granted') currentLocation().then(setPhone);
   }, [last, data.locationPermission, currentLocation]);
 
-  const campusCentre = useMemo(() => centreOf(campus.buildings), [campus.buildings]);
+  const campusCentre = useMemo(() => campus.campus?.centre ?? centreOf(campus.buildings), [campus.campus, campus.buildings]);
   const initial = last ?? phone ?? campusCentre ?? data.places[0] ?? null;
+
+  // Switching university moves the map to that campus.
+  const campusSlug = campus.campus?.slug;
+  const campusPoint = campus.campus?.centre;
+  const shownCampus = useRef(campusSlug);
+  useEffect(() => {
+    if (!campusSlug || shownCampus.current === campusSlug || !campusPoint) return;
+    shownCampus.current = campusSlug;
+    mapRef.current?.setCameraPosition({ coordinates: campusPoint, zoom: 16 });
+  }, [campusSlug, campusPoint]);
 
   const focusPoint = (pt: LatLon, zoom = 18) => mapRef.current?.setCameraPosition({ coordinates: pt, zoom });
   const focusHit = (hit: SearchHit) => {
@@ -69,8 +79,8 @@ export default function MapScreen() {
     return {
       id: `b${b.id}`,
       coordinates: (b.footprint[0] ?? []).map(([longitude, latitude]) => ({ latitude, longitude })),
-      color: on ? 'rgba(142,47,68,0.32)' : here ? 'rgba(62,123,92,0.28)' : 'rgba(142,47,68,0.10)',
-      lineColor: on ? p.primary : here ? p.sage : 'rgba(142,47,68,0.45)',
+      color: on ? withAlpha(p.primary, 0.3) : here ? withAlpha(p.sage, 0.25) : 'rgba(142,142,147,0.14)',
+      lineColor: on ? p.primary : here ? p.sage : 'rgba(142,142,147,0.55)',
       lineWidth: on ? 2.5 : 1,
     };
   });
@@ -79,12 +89,12 @@ export default function MapScreen() {
       id: `place-${pl.id}`,
       center: { latitude: pl.latitude, longitude: pl.longitude },
       radius: pl.radius,
-      color: pl.kind === 'safe' ? 'rgba(62,123,92,0.18)' : 'rgba(142,47,68,0.12)',
-      lineColor: pl.kind === 'safe' ? p.sage : p.link,
+      color: pl.kind === 'safe' ? withAlpha(p.sage, 0.18) : withAlpha(p.amber, 0.15),
+      lineColor: pl.kind === 'safe' ? p.sage : p.amber,
       lineWidth: 1.5,
     })),
     ...(last
-      ? [{ id: 'last-seen', center: last, radius: Math.max(15, last.accuracy ?? 15), color: 'rgba(142,47,68,0.14)', lineColor: p.link, lineWidth: 2 }]
+      ? [{ id: 'last-seen', center: last, radius: Math.max(15, last.accuracy ?? 15), color: withAlpha(p.primary, 0.14), lineColor: p.link, lineWidth: 2 }]
       : []),
   ];
   const markers: AppleMaps.Marker[] = [
@@ -114,7 +124,7 @@ export default function MapScreen() {
       tintColor: p.idle,
     })),
     ...(last
-      ? [{ id: 'last-seen-pin', coordinates: last, title: tag.tracker?.name ?? 'MiniTag', tintColor: p.primary, systemImage: 'person.text.rectangle.fill' }]
+      ? [{ id: 'last-seen-pin', coordinates: last, title: tag.tracker?.name ?? 'MiTag', tintColor: p.primary, systemImage: 'person.text.rectangle.fill' }]
       : []),
   ];
 
@@ -155,7 +165,7 @@ export default function MapScreen() {
           <View style={[StyleSheet.absoluteFill, s.mapPlaceholder]}>
             <T variant="body" style={{ color: p.muted, textAlign: 'center' }}>
               {permissionBlocked
-                ? 'Location is off for MiniTag, so there is nothing to show on the map yet.'
+                ? 'Location is off for MiTag, so there is nothing to show on the map yet.'
                 : 'The campus map is loading. It needs the internet the first time.'}
             </T>
           </View>
@@ -167,7 +177,7 @@ export default function MapScreen() {
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search PAU: building or room"
+              placeholder={campus.campus ? `Search ${campus.campus.shortName}: building or room` : 'Search campus'}
               placeholderTextColor={p.muted}
               keyboardAppearance={p.mode}
               returnKeyType="search"
@@ -206,7 +216,11 @@ export default function MapScreen() {
         <Text style={s.attribution}>© OpenStreetMap contributors</Text>
       </View>
 
-      <ScrollView style={s.sheet} contentContainerStyle={s.sheetContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={s.sheet}
+        contentContainerStyle={s.sheetContent}
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled">
         <HereCard />
 
         {building ? (
@@ -251,11 +265,10 @@ export default function MapScreen() {
             )}
             {auth.isAdmin && (
               <Button
-                title="Add a room here"
+                title="Add a Room Here"
                 icon="plus"
                 variant="outline"
                 onPress={() => router.push({ pathname: '/add-room', params: { building: String(building.id) } })}
-                style={{ minHeight: 48 }}
               />
             )}
           </>
@@ -270,14 +283,13 @@ export default function MapScreen() {
               </Text>
             </View>
             <Text style={s.note}>
-              Where your phone was when MiniTag last had a connection. The building comes from the campus map, the floor from
+              Where your phone was when MiTag last had a connection. The building comes from the campus map, the floor from
               your phone’s barometer. The tag has no GPS of its own.
             </Text>
             <Button
-              title={connected ? 'Make it beep' : "Beep when I'm in range"}
+              title={connected ? 'Play Sound' : "Beep When I'm in Range"}
               icon="speaker.wave.2.fill"
               onPress={() => router.push('/find')}
-              style={{ minHeight: 54 }}
             />
             {data.history.length > 1 &&
               data.history.slice(1, 6).map((h) => (
@@ -294,16 +306,16 @@ export default function MapScreen() {
             <Text style={s.title}>No last-seen place yet</Text>
             <Text style={s.note}>
               {!tag.tracker
-                ? 'Set up your MiniTag first. MiniTag then remembers where your phone was each time the tag connects or drops out.'
+                ? 'Set up your MiTag first. MiTag then remembers where your phone was each time the tag connects or drops out.'
                 : !data.prefs.rememberLastSeen
                   ? 'Remember last seen is turned off in Settings.'
-                  : 'MiniTag saves where your phone is while the tag is connected, and the spot where it drops out.'}
+                  : 'MiTag saves where your phone is while the tag is connected, and the spot where it drops out.'}
             </Text>
             {!tag.tracker ? (
-              <Button title="Set up MiniTag" onPress={() => router.push('/pair')} />
+              <Button title="Set Up MiTag" onPress={() => router.push('/pair')} />
             ) : data.locationPermission !== 'granted' ? (
               <Button
-                title="Turn on location"
+                title="Turn On Location"
                 icon="location.fill"
                 onPress={() => (permissionBlocked ? Linking.openSettings() : data.requestLocation())}
               />
@@ -312,8 +324,10 @@ export default function MapScreen() {
         )}
 
         <Text style={s.small}>
-          {campus.buildings.length
-            ? `PAU campus: ${campus.buildings.length} buildings, ${campus.rooms.length} rooms${campus.fetchedAt ? ` · updated ${formatWhen(campus.fetchedAt, now).toLowerCase()}` : ''}`
+          {!campus.campus
+            ? 'Choose your university in Settings to see its campus map.'
+            : campus.buildings.length
+            ? `${campus.campus.shortName} campus: ${campus.buildings.length} buildings, ${campus.rooms.length} rooms${campus.fetchedAt ? ` · updated ${formatWhen(campus.fetchedAt, now).toLowerCase()}` : ''}`
             : campus.loading
               ? 'Loading the campus map…'
               : 'Campus buildings appear once they are loaded into the database.'}
@@ -346,7 +360,7 @@ function HereCard() {
       </View>
       {needsMotion ? (
         <Button
-          title={indoor.motionPermission === 'denied' ? 'Allow Motion in Settings for floors' : 'Turn on floor detection'}
+          title={indoor.motionPermission === 'denied' ? 'Allow Motion in Settings for Floors' : 'Turn On Floor Detection'}
           variant="outline"
           onPress={() => (indoor.motionPermission === 'denied' ? Linking.openSettings() : indoor.requestMotion())}
           style={{ minHeight: 44 }}
@@ -362,7 +376,7 @@ function HereCard() {
             accessibilityRole="button"
             onPress={() =>
               indoor.calibrateGround()
-                ? Alert.alert('Ground floor set', 'MiniTag will measure floors from here.')
+                ? Alert.alert('Ground floor set', 'MiTag will measure floors from here.')
                 : Alert.alert('No barometer reading yet', 'Wait a second and try again.')
             }
             style={({ pressed }) => [s.calButton, pressed && { opacity: 0.7 }]}>
@@ -372,6 +386,12 @@ function HereCard() {
       ) : null}
     </View>
   );
+}
+
+/** '#RRGGBB' + alpha -> 'rgba(r,g,b,a)' for map overlays. */
+function withAlpha(hex: string, alpha: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 function centreOf(buildings: Building[]): LatLon | null {
@@ -394,40 +414,42 @@ function useNow(ms = 30_000) {
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    mapPlaceholder: { backgroundColor: p.primarySoft, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+    mapPlaceholder: { backgroundColor: p.disabledBg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
     searchWrap: { position: 'absolute', left: 16, right: 16, gap: 6 },
     search: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
       backgroundColor: p.surface,
-      borderRadius: R.pill,
-      paddingHorizontal: 14,
-      minHeight: 46,
-      shadowColor: '#4E1420',
-      shadowOpacity: 0.14,
-      shadowRadius: 7,
-      shadowOffset: { width: 0, height: 4 },
+      borderRadius: 12,
+      borderCurve: 'continuous',
+      paddingHorizontal: 10,
+      minHeight: 44,
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
     },
-    searchInput: { flex: 1, fontFamily: F.bodyMedium, fontSize: 15, color: p.ink, paddingVertical: 10 },
+    searchInput: { flex: 1, ...F.body, fontSize: 17, color: p.ink, paddingVertical: 10 },
     results: {
       backgroundColor: p.surface,
-      borderRadius: 18,
+      borderRadius: 12,
+      borderCurve: 'continuous',
       paddingHorizontal: 14,
-      shadowColor: '#4E1420',
-      shadowOpacity: 0.14,
-      shadowRadius: 7,
-      shadowOffset: { width: 0, height: 4 },
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
     },
     resultRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52 },
-    resultName: { fontFamily: F.bodySemibold, fontSize: 15, color: p.ink },
-    resultSub: { fontFamily: F.body, fontSize: 12, color: p.muted },
-    noResults: { fontFamily: F.body, fontSize: 14, color: p.muted, paddingVertical: 14 },
+    resultName: { ...F.body, fontSize: 17, color: p.ink },
+    resultSub: { ...F.body, fontSize: 13, color: p.muted },
+    noResults: { ...F.body, fontSize: 15, color: p.muted, paddingVertical: 14 },
     attribution: {
       position: 'absolute',
       right: 8,
-      bottom: 34,
-      fontFamily: F.body,
+      bottom: 24,
+      ...F.body,
       fontSize: 10,
       color: '#3a3a3a',
       backgroundColor: 'rgba(255,255,255,0.75)',
@@ -435,35 +457,42 @@ const makeStyles = (p: Palette) =>
       borderRadius: 4,
       overflow: 'hidden',
     },
-    sheet: { marginTop: -28, backgroundColor: p.surface, borderTopLeftRadius: 30, borderTopRightRadius: 30 },
-    sheetContent: { padding: 20, gap: 12, paddingBottom: 24 },
+    sheet: { marginTop: -16, backgroundColor: p.ground, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
+    sheetContent: { padding: 16, gap: 12, paddingBottom: 24 },
     sheetTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    chip: { alignSelf: 'flex-start', backgroundColor: p.accent, borderRadius: R.pill, paddingHorizontal: 10, paddingVertical: 4 },
-    chipText: { fontFamily: F.bodySemibold, fontSize: 12, color: p.onAccent },
-    title: { fontFamily: F.display, fontSize: 28, lineHeight: 32, letterSpacing: -0.6, color: p.ink, marginTop: 6 },
-    note: {
-      fontFamily: F.body,
-      fontSize: 13,
-      lineHeight: 19,
-      color: p.muted,
-      backgroundColor: p.ground,
-      borderRadius: 14,
-      paddingVertical: 10,
+    chip: { alignSelf: 'flex-start' },
+    chipText: { ...F.bodySemibold, fontSize: 13, color: p.muted, textTransform: 'uppercase' },
+    title: { ...F.display, fontSize: 22, lineHeight: 28, color: p.ink, marginTop: 2 },
+    note: { ...F.body, fontSize: 15, lineHeight: 20, color: p.muted },
+    small: { ...F.body, fontSize: 13, lineHeight: 18, color: p.muted },
+    floorTitle: { ...F.body, fontSize: 13, color: p.muted, textTransform: 'uppercase', marginTop: 4, marginBottom: 6, marginLeft: 4 },
+    roomRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      minHeight: 44,
       paddingHorizontal: 12,
-      overflow: 'hidden',
+      backgroundColor: p.surface,
+      borderRadius: 10,
+      marginBottom: 2,
     },
-    small: { fontFamily: F.body, fontSize: 12, lineHeight: 17, color: p.muted },
-    floorTitle: { fontFamily: F.bodySemibold, fontSize: 13, color: p.muted, marginTop: 4, marginBottom: 2 },
-    roomRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, borderRadius: 12, paddingHorizontal: 8 },
-    roomName: { fontFamily: F.bodyMedium, fontSize: 15, color: p.ink, flex: 1 },
-    historyRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: p.divider },
-    historyName: { fontFamily: F.bodyMedium, fontSize: 14, color: p.ink, flex: 1 },
-    historyWhen: { fontFamily: F.body, fontSize: 14, color: p.muted },
-    here: { backgroundColor: p.ground, borderRadius: 18, padding: 12, gap: 10, borderWidth: 1, borderColor: p.border },
-    hereDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: p.sage, borderWidth: 2, borderColor: p.sageBg },
-    hereLabel: { fontFamily: F.bodySemibold, fontSize: 11, color: p.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
-    hereText: { fontFamily: F.bodySemibold, fontSize: 15, color: p.ink, marginTop: 1 },
+    roomName: { ...F.body, fontSize: 17, color: p.ink, flex: 1 },
+    historyRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 11,
+      paddingHorizontal: 12,
+      backgroundColor: p.surface,
+      borderRadius: 10,
+    },
+    historyName: { ...F.body, fontSize: 17, color: p.ink, flex: 1 },
+    historyWhen: { ...F.body, fontSize: 17, color: p.muted },
+    here: { backgroundColor: p.surface, borderRadius: 12, borderCurve: 'continuous', padding: 14, gap: 12 },
+    hereDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: p.sageDot, borderWidth: 2, borderColor: p.sageBg },
+    hereLabel: { ...F.body, fontSize: 13, color: p.muted },
+    hereText: { ...F.bodySemibold, fontSize: 17, color: p.ink, marginTop: 1 },
     calRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    calButton: { borderRadius: R.pill, borderWidth: 1, borderColor: p.link, paddingHorizontal: 12, paddingVertical: 8 },
-    calButtonText: { fontFamily: F.bodySemibold, fontSize: 13, color: p.link },
+    calButton: { borderRadius: 8, backgroundColor: p.primarySoft, paddingHorizontal: 12, paddingVertical: 8 },
+    calButtonText: { ...F.bodySemibold, fontSize: 15, color: p.link },
   });
