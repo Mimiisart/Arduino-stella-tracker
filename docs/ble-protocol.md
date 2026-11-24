@@ -35,6 +35,8 @@ Commands are case-insensitive. Leading and trailing spaces and newlines are igno
 | `STOP` | Stops the buzzer immediately | `OK STOP` |
 | `STATUS` | Re-samples the battery and publishes Status | `OK STATUS` |
 | `BATTERY` | Same as `STATUS` | `OK BATTERY` |
+| `ARM` | Firmware 0.2+: beep by itself if the phone is lost (see Leave-behind detection) | `OK ARM` |
+| `DISARM` | Firmware 0.2+: cancel that, and silence a left-behind beep | `OK DISARM` |
 | `UWB_START` / `UWB_STOP` | Not used: UWB goes through Nearby Interaction (see below) | `ERR UWB_VIA_NI` |
 | anything else | — | `ERR UNKNOWN_CMD` |
 
@@ -55,7 +57,7 @@ not need to request a larger one.
 | Byte | Field | Notes |
 |---|---|---|
 | 0 | protocol version | currently `1` |
-| 1 | flags | bit0 buzzer active · bit1 UWB session active · bit2 battery reading valid · bit3 USB powered |
+| 1 | flags | bit0 buzzer active · bit1 UWB session active · bit2 battery reading valid · bit3 USB powered · bit4 left-behind beep armed (0.2+) |
 | 2–3 | supply millivolts | uint16, little-endian; `0` = unknown |
 | 4 | firmware major | |
 | 5 | firmware minor | |
@@ -84,6 +86,7 @@ export function parseStatus(base64: string) {
     uwbActive: (flags & 0x02) !== 0,
     batteryValid: (flags & 0x04) !== 0,
     usbPowered: (flags & 0x08) !== 0,
+    awayArmed: (flags & 0x10) !== 0,
     millivolts: b.readUInt16LE(2),
     firmware: `${b.readUInt8(4)}.${b.readUInt8(5)}`,
   };
@@ -109,7 +112,27 @@ find the tag as `MiniTag`.
 
 ## Leave-behind detection
 
-Leave-behind detection runs entirely on the phone: it watches for the BLE
-disconnect and then applies the delay and reconnect check from the spec. The
-firmware deliberately keeps any active FIND sounding after a disconnect, so you
-can still walk toward the beep. The FIND timeout still ends it.
+Leave-behind detection has two parts.
+
+**On the phone (always):** the app watches for the BLE disconnect, waits the
+chosen delay (30 s, 1 min or 2 min) and, if the tag has not reconnected and the
+phone is not at a saved safe place, shows a "left behind?" notification.
+
+**On the tag (firmware 0.2+, when armed):** the app sends `ARM` after every
+connection while "Tracker beeps too" is on, and `DISARM` when alerts are off,
+snoozed, the phone is at a safe place, or the tracker is being removed. If an
+armed tag loses its last connection:
+
+1. It waits `AWAY_GRACE_SECONDS` (10 s), so a short Bluetooth drop is ignored.
+2. If no phone has reconnected, it plays the left-behind pattern (three 300 ms
+   beeps every 3 s, unlike FIND's double beep) for `AWAY_BEEP_SECONDS` (20 s).
+3. Reconnecting, `DISARM` or pressing the tag's button stops it.
+
+The armed flag lives in RAM, so after a reset the tag stays quiet until the
+phone reconnects and arms it again. Known false alarms: turning the phone's
+Bluetooth off, the phone's battery dying, or force-quitting the app also drop
+the connection, so the tag beeps then too.
+
+The firmware also keeps any active FIND sounding after a disconnect, so you can
+still walk toward the beep. The FIND timeout still ends it, and a left-behind
+beep never cuts a FIND short.

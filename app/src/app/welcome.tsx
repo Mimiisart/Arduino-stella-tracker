@@ -30,6 +30,8 @@ export default function WelcomeScreen() {
     }
     setBusy(false);
     router.replace('/');
+    // Offer an account next; it's optional and the screen has Cancel.
+    if (askOptional) router.push('/account?mode=signup');
   };
 
   return (

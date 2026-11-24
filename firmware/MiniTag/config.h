@@ -9,7 +9,7 @@
 // ---- Identity ---------------------------------------------------------------
 #define MINITAG_DEVICE_NAME   "MiniTag"   // what phones see when scanning
 #define MINITAG_FW_MAJOR      0
-#define MINITAG_FW_MINOR      1
+#define MINITAG_FW_MINOR      2
 #define MINITAG_PROTOCOL_VER  1           // bump when the BLE protocol changes
 
 // ---- Pins (nRF52840 pin names) ----------------------------------------------
@@ -25,6 +25,12 @@
 #define FIND_DEFAULT_SECONDS  30          // FIND with no argument
 #define FIND_MAX_SECONDS      120         // cap so a lost tag cannot drain the cell
 #define BOOT_CHIRP            1           // short beep at power-up (pin self-test)
+
+// ---- Left-behind beep (armed by the app with ARM / DISARM) ------------------
+// If an armed tag loses its phone, it waits out short Bluetooth drops, then
+// beeps for a limited time so someone nearby notices the ID card.
+#define AWAY_GRACE_SECONDS    10          // ignore drops shorter than this
+#define AWAY_BEEP_SECONDS     20          // then beep this long (battery cap)
 
 // ---- Battery ----------------------------------------------------------------
 #define BATTERY_SAMPLE_MS     60000       // background VDD sample period

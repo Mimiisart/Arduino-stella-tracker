@@ -4,6 +4,8 @@
   - Advertises as "MiniTag" over BLE.
   - MiniTag service: text commands (FIND / STOP / STATUS / BATTERY), short
     text events and a 6-byte binary status. See docs/ble-protocol.md.
+  - Left-behind beep: once the app sends ARM, losing the phone for longer
+    than AWAY_GRACE_SECONDS makes the tag beep for AWAY_BEEP_SECONDS.
   - Apple Nearby Interaction / Android UWB precision finding through the
     StellaUWB library's own BLE services, on the same connection.
 
@@ -31,11 +33,18 @@ const uint8_t FLAG_BUZZER_ACTIVE = 1 << 0;
 const uint8_t FLAG_UWB_SESSION   = 1 << 1;
 const uint8_t FLAG_BATTERY_VALID = 1 << 2;
 const uint8_t FLAG_USB_POWERED   = 1 << 3;
+const uint8_t FLAG_AWAY_ARMED    = 1 << 4;
 
 uint16_t numConnected = 0;
 uint16_t numUwbSessions = 0;
 uint16_t lastBatteryMv = 0;
 unsigned long lastBatterySampleAt = 0;
+
+// Left-behind state. Armed lives in RAM only: after a reset the tag stays
+// quiet until the phone reconnects and arms it again.
+bool awayArmed = false;
+bool awayPending = false;       // phone lost, waiting out the grace period
+unsigned long awayDueAt = 0;
 
 // ---- Helpers ----------------------------------------------------------------
 
@@ -53,6 +62,7 @@ void publishStatus() {
   if (numUwbSessions > 0)   flags |= FLAG_UWB_SESSION;
   if (lastBatteryMv > 0)    flags |= FLAG_BATTERY_VALID;
   if (battery::usbPowered()) flags |= FLAG_USB_POWERED;
+  if (awayArmed)            flags |= FLAG_AWAY_ARMED;
 
   uint8_t status[6] = {
     MINITAG_PROTOCOL_VER,
@@ -100,6 +110,18 @@ void handleCommand(char *cmd) {
   } else if (strcmp(cmd, "STOP") == 0) {
     buzzer::stop();
     sendEvent("OK STOP");
+    publishStatus();
+
+  } else if (strcmp(cmd, "ARM") == 0) {
+    awayArmed = true;
+    sendEvent("OK ARM");
+    publishStatus();
+
+  } else if (strcmp(cmd, "DISARM") == 0) {
+    awayArmed = false;
+    awayPending = false;
+    if (buzzer::isAway()) buzzer::stop();
+    sendEvent("OK DISARM");
     publishStatus();
 
   } else if (strcmp(cmd, "STATUS") == 0 || strcmp(cmd, "BATTERY") == 0) {
@@ -155,6 +177,9 @@ void clientConnected(BLEDevice dev) {
     UWB.begin();  // start the UWB engine only while a phone is connected
   }
   numConnected++;
+  // The phone is back: cancel or silence the left-behind beep.
+  awayPending = false;
+  if (buzzer::isAway()) buzzer::stop();
   Serial.print("Connected: ");
   Serial.println(dev.address());
   sampleBattery();
@@ -166,6 +191,11 @@ void clientDisconnected(BLEDevice dev) {
   if (numConnected == 0) {
     UWB.end();
     numUwbSessions = 0;
+  }
+  // Left behind? Wait out short drops before beeping (see loop()).
+  if (numConnected == 0 && awayArmed) {
+    awayPending = true;
+    awayDueAt = millis() + AWAY_GRACE_SECONDS * 1000UL;
   }
   // A FIND keeps sounding after the phone drops: the user may be walking
   // toward the beep. The FIND timeout still stops it.
@@ -247,6 +277,14 @@ void loop() {
   if (buzzer::update()) {
     sendEvent("EVT FIND_TIMEOUT");
     publishStatus();
+  }
+
+  if (awayPending && (long)(millis() - awayDueAt) >= 0) {
+    awayPending = false;
+    if (!buzzer::isActive()) {  // never cut short a FIND
+      Serial.println("Left behind: beeping");
+      buzzer::startAway(AWAY_BEEP_SECONDS);
+    }
   }
 
   pollButton();

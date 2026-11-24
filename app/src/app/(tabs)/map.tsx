@@ -1,18 +1,24 @@
 import { AppleMaps } from 'expo-maps';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/backend/auth-context';
 import { useMiniTag } from '@/ble/minitag-context';
-import { Button, T, formatWhen } from '@/components/minitag/ui';
+import { Button, Icon, T, formatWhen } from '@/components/minitag/ui';
 import { F, R } from '@/constants/minitag';
 import { useAppData } from '@/features/app-data';
+import { campusIcon, searchCampus, useCampus, type SearchHit } from '@/features/campus';
 import type { LatLon } from '@/features/geo';
+import { floorName, polygonCentre, type Building } from '@/features/indoor';
+import { useIndoor } from '@/features/indoor-context';
 import { usePalette, useThemedStyles } from '@/theme/theme-context';
 import type { Palette } from '@/theme/themes';
 
-const MAP_HEIGHT = 390;
+type AppleMapsPolygon = NonNullable<AppleMaps.MapProps['polygons']>[number];
+
+const MAP_HEIGHT = 420;
 
 export default function MapScreen() {
   const p = usePalette();
@@ -20,20 +26,54 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const tag = useMiniTag();
   const data = useAppData();
-  const [here, setHere] = useState<LatLon | null>(null);
+  const campus = useCampus();
+  const indoor = useIndoor();
+  const auth = useAuth();
+  const mapRef = useRef<AppleMaps.MapView>(null);
+  const [phone, setPhone] = useState<LatLon | null>(null);
+  const [query, setQuery] = useState('');
+  const [selectedBuilding, setSelectedBuilding] = useState<number | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<number | null>(null);
   const now = useNow();
 
   const last = data.lastSeen;
   const connected = tag.connection === 'connected';
+  const building = campus.buildings.find((b) => b.id === selectedBuilding) ?? null;
+  const results = useMemo(() => searchCampus(campus, query), [campus, query]);
 
-  // Without a last-seen point yet, centre on the phone so the map isn't blank.
   const { currentLocation } = data;
   useEffect(() => {
-    if (!last && data.locationPermission === 'granted') currentLocation().then(setHere);
+    if (!last && data.locationPermission === 'granted') currentLocation().then(setPhone);
   }, [last, data.locationPermission, currentLocation]);
 
-  const center = last ?? here ?? data.places[0] ?? null;
+  const campusCentre = useMemo(() => centreOf(campus.buildings), [campus.buildings]);
+  const initial = last ?? phone ?? campusCentre ?? data.places[0] ?? null;
 
+  const focusPoint = (pt: LatLon, zoom = 18) => mapRef.current?.setCameraPosition({ coordinates: pt, zoom });
+  const focusHit = (hit: SearchHit) => {
+    setQuery('');
+    Keyboard.dismiss();
+    setSelectedBuilding(hit.buildingId);
+    setSelectedRoom(hit.kind === 'room' ? hit.id : null);
+    focusPoint(hit.point, hit.kind === 'room' ? 19 : 18);
+  };
+  const focusBuilding = (b: Building) => {
+    setSelectedBuilding(b.id);
+    setSelectedRoom(null);
+    focusPoint(polygonCentre(b.footprint));
+  };
+
+  const polygons: AppleMapsPolygon[] = campus.buildings.map((b) => {
+    const on = b.id === selectedBuilding;
+    const here = indoor.here?.inside && indoor.here.building?.id === b.id;
+    return {
+      id: `b${b.id}`,
+      coordinates: (b.footprint[0] ?? []).map(([longitude, latitude]) => ({ latitude, longitude })),
+      color: on ? 'rgba(142,47,68,0.32)' : here ? 'rgba(62,123,92,0.28)' : 'rgba(142,47,68,0.10)',
+      lineColor: on ? p.primary : here ? p.sage : 'rgba(142,47,68,0.45)',
+      lineWidth: on ? 2.5 : 1,
+    };
+  });
   const circles: AppleMaps.Circle[] = [
     ...data.places.map((pl) => ({
       id: `place-${pl.id}`,
@@ -44,25 +84,69 @@ export default function MapScreen() {
       lineWidth: 1.5,
     })),
     ...(last
-      ? [{ id: 'last-seen', center: last, radius: Math.max(30, last.accuracy ?? 30), color: 'rgba(142,47,68,0.14)', lineColor: p.link, lineWidth: 2 }]
+      ? [{ id: 'last-seen', center: last, radius: Math.max(15, last.accuracy ?? 15), color: 'rgba(142,47,68,0.14)', lineColor: p.link, lineWidth: 2 }]
       : []),
   ];
-  const markers: AppleMaps.Marker[] = last
-    ? [{ id: 'last-seen-pin', coordinates: last, title: tag.tracker?.name ?? 'MiniTag', tintColor: p.primary, systemImage: 'person.text.rectangle.fill' }]
-    : [];
+  const markers: AppleMaps.Marker[] = [
+    ...campus.buildings
+      .filter((b) => b.name)
+      .map((b) => ({
+        id: `bm${b.id}`,
+        coordinates: polygonCentre(b.footprint),
+        title: b.name!,
+        systemImage: campusIcon(b.category),
+        tintColor: b.id === selectedBuilding ? p.primary : p.idle,
+      })),
+    ...campus.rooms
+      .filter((r) => r.buildingId === selectedBuilding)
+      .map((r) => ({
+        id: `rm${r.id}`,
+        coordinates: { latitude: r.latitude, longitude: r.longitude },
+        title: `${r.name} · ${floorName(r.floor)}`,
+        systemImage: campusIcon(r.kind),
+        tintColor: r.id === selectedRoom ? p.primary : p.link,
+      })),
+    ...campus.places.map((c) => ({
+      id: `pm${c.id}`,
+      coordinates: { latitude: c.latitude, longitude: c.longitude },
+      title: c.name,
+      systemImage: campusIcon(c.category),
+      tintColor: p.idle,
+    })),
+    ...(last
+      ? [{ id: 'last-seen-pin', coordinates: last, title: tag.tracker?.name ?? 'MiniTag', tintColor: p.primary, systemImage: 'person.text.rectangle.fill' }]
+      : []),
+  ];
+
+  const onMarker = (id?: string) => {
+    if (!id) return;
+    if (id.startsWith('bm')) {
+      const b = campus.buildings.find((x) => x.id === Number(id.slice(2)));
+      if (b) focusBuilding(b);
+    } else if (id.startsWith('rm')) {
+      setSelectedRoom(Number(id.slice(2)));
+    }
+  };
 
   const permissionBlocked = data.locationPermission === 'denied';
+  const roomsByFloor = useMemo(() => {
+    const rooms = campus.rooms.filter((r) => r.buildingId === selectedBuilding);
+    const floors = [...new Set(rooms.map((r) => r.floor))].sort((a, b) => a - b);
+    return floors.map((f) => ({ floor: f, rooms: rooms.filter((r) => r.floor === f) }));
+  }, [campus.rooms, selectedBuilding]);
 
   return (
     <View style={{ flex: 1, backgroundColor: p.ground }}>
       <View style={{ height: MAP_HEIGHT }}>
-        {Platform.OS === 'ios' && center ? (
+        {Platform.OS === 'ios' && initial ? (
           <AppleMaps.View
-            key={center ? `${center.latitude.toFixed(4)},${center.longitude.toFixed(4)}` : 'none'}
+            ref={mapRef}
             style={StyleSheet.absoluteFill}
-            cameraPosition={{ coordinates: center, zoom: 16 }}
+            cameraPosition={{ coordinates: initial, zoom: 17 }}
+            polygons={polygons}
             circles={circles}
             markers={markers}
+            onMarkerClick={(m) => onMarker(m.id)}
             colorScheme={p.mode === 'dark' ? AppleMaps.MapColorScheme.DARK : AppleMaps.MapColorScheme.LIGHT}
             properties={{ isMyLocationEnabled: data.locationPermission === 'granted' }}
             uiSettings={{ compassEnabled: false, scaleBarEnabled: false, myLocationButtonEnabled: false }}
@@ -72,28 +156,122 @@ export default function MapScreen() {
             <T variant="body" style={{ color: p.muted, textAlign: 'center' }}>
               {permissionBlocked
                 ? 'Location is off for MiniTag, so there is nothing to show on the map yet.'
-                : 'The map appears after MiniTag has seen your tag at least once with location on.'}
+                : 'The campus map is loading. It needs the internet the first time.'}
             </T>
           </View>
         )}
-        <View style={[s.mapPill, { top: insets.top + 8 }]}>
-          <Text style={s.mapPillText}>Last seen map</Text>
+
+        <View style={[s.searchWrap, { top: insets.top + 8 }]}>
+          <View style={s.search}>
+            <Icon name="magnifyingglass" size={17} color={p.muted} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search PAU: building or room"
+              placeholderTextColor={p.muted}
+              keyboardAppearance={p.mode}
+              returnKeyType="search"
+              onSubmitEditing={() => results[0] && focusHit(results[0])}
+              accessibilityLabel="Search campus buildings and rooms"
+              style={s.searchInput}
+            />
+            {query.length > 0 && (
+              <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
+                <Icon name="xmark.circle.fill" size={18} color={p.muted} />
+              </Pressable>
+            )}
+          </View>
+          {query.trim().length > 0 && (
+            <View style={s.results}>
+              {results.length === 0 ? (
+                <Text style={s.noResults}>Nothing on campus matches “{query.trim()}”.</Text>
+              ) : (
+                results.map((r, i) => (
+                  <Pressable
+                    key={r.key}
+                    accessibilityRole="button"
+                    onPress={() => focusHit(r)}
+                    style={({ pressed }) => [s.resultRow, i > 0 && { borderTopWidth: 1, borderTopColor: p.divider }, pressed && { opacity: 0.7 }]}>
+                    <Icon name={r.icon} size={18} color={p.link} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.resultName}>{r.name}</Text>
+                      <Text style={s.resultSub}>{r.subtitle}</Text>
+                    </View>
+                  </Pressable>
+                ))
+              )}
+            </View>
+          )}
         </View>
+        <Text style={s.attribution}>© OpenStreetMap contributors</Text>
       </View>
 
-      <ScrollView style={s.sheet} contentContainerStyle={s.sheetContent}>
-        {last ? (
+      <ScrollView style={s.sheet} contentContainerStyle={s.sheetContent} keyboardShouldPersistTaps="handled">
+        <HereCard />
+
+        {building ? (
+          <>
+            <View style={s.sheetTop}>
+              <View style={s.chip}>
+                <Text style={s.chipText}>{building.category}</Text>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close building details" onPress={() => setSelectedBuilding(null)} hitSlop={10}>
+                <Icon name="xmark" size={16} color={p.muted} weight="semibold" />
+              </Pressable>
+            </View>
+            <Text style={s.title} numberOfLines={2}>
+              {building.name ?? 'Campus building'}
+            </Text>
+            <Text style={s.small}>
+              {building.levels ? `${building.levels} floor${building.levels === 1 ? '' : 's'}` : 'Floors not recorded yet'} · outline from
+              OpenStreetMap
+            </Text>
+            {roomsByFloor.length === 0 ? (
+              <Text style={s.note}>No rooms recorded in this building yet.</Text>
+            ) : (
+              roomsByFloor.map(({ floor, rooms }) => (
+                <View key={floor}>
+                  <Text style={s.floorTitle}>{floorName(floor)}</Text>
+                  {rooms.map((r) => (
+                    <Pressable
+                      key={r.id}
+                      accessibilityRole="button"
+                      onPress={() => {
+                        setSelectedRoom(r.id);
+                        focusPoint(r, 19);
+                      }}
+                      style={[s.roomRow, r.id === selectedRoom && { backgroundColor: p.primarySoft }]}>
+                      <Icon name={campusIcon(r.kind)} size={17} color={p.link} />
+                      <Text style={s.roomName}>{r.name}</Text>
+                      <Text style={s.small}>{r.kind}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ))
+            )}
+            {auth.isAdmin && (
+              <Button
+                title="Add a room here"
+                icon="plus"
+                variant="outline"
+                onPress={() => router.push({ pathname: '/add-room', params: { building: String(building.id) } })}
+                style={{ minHeight: 48 }}
+              />
+            )}
+          </>
+        ) : last ? (
           <>
             <View>
-              <View style={s.timeChip}>
-                <Text style={s.timeChipText}>{connected ? 'Connected now' : formatWhen(last.at, now)}</Text>
+              <View style={s.chip}>
+                <Text style={s.chipText}>{connected ? 'Connected now' : `Last seen ${formatWhen(last.at, now).toLowerCase()}`}</Text>
               </View>
-              <Text style={s.title} numberOfLines={2}>
+              <Text style={s.title} numberOfLines={3}>
                 {last.label}
               </Text>
             </View>
             <Text style={s.note}>
-              This is where your phone was when MiniTag last had a connection. The tag has no GPS of its own.
+              Where your phone was when MiniTag last had a connection. The building comes from the campus map, the floor from
+              your phone’s barometer. The tag has no GPS of its own.
             </Text>
             <Button
               title={connected ? 'Make it beep' : "Beep when I'm in range"}
@@ -101,18 +279,15 @@ export default function MapScreen() {
               onPress={() => router.push('/find')}
               style={{ minHeight: 54 }}
             />
-            {data.history.length > 1 && (
-              <View>
-                {data.history.slice(1, 6).map((h) => (
-                  <View key={`${h.at}`} style={s.historyRow}>
-                    <Text style={s.historyName} numberOfLines={1}>
-                      {h.label}
-                    </Text>
-                    <Text style={s.historyWhen}>{formatWhen(h.at, now)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            {data.history.length > 1 &&
+              data.history.slice(1, 6).map((h) => (
+                <View key={`${h.at}`} style={s.historyRow}>
+                  <Text style={s.historyName} numberOfLines={1}>
+                    {h.label}
+                  </Text>
+                  <Text style={s.historyWhen}>{formatWhen(h.at, now)}</Text>
+                </View>
+              ))}
           </>
         ) : (
           <>
@@ -132,14 +307,80 @@ export default function MapScreen() {
                 icon="location.fill"
                 onPress={() => (permissionBlocked ? Linking.openSettings() : data.requestLocation())}
               />
-            ) : !data.prefs.rememberLastSeen ? (
-              <Button title="Open Settings" variant="outline" onPress={() => router.navigate('/settings')} />
             ) : null}
           </>
         )}
+
+        <Text style={s.small}>
+          {campus.buildings.length
+            ? `PAU campus: ${campus.buildings.length} buildings, ${campus.rooms.length} rooms${campus.fetchedAt ? ` · updated ${formatWhen(campus.fetchedAt, now).toLowerCase()}` : ''}`
+            : campus.loading
+              ? 'Loading the campus map…'
+              : 'Campus buildings appear once they are loaded into the database.'}
+          {campus.error ? `  ${campus.error}` : ''}
+        </Text>
       </ScrollView>
     </View>
   );
+}
+
+/** Live "you are here" with floor detection controls. */
+function HereCard() {
+  const s = useThemedStyles(makeStyles);
+  const indoor = useIndoor();
+  const now = useNow(15_000);
+  const here = indoor.here;
+  const needsMotion = indoor.barometerAvailable && indoor.motionPermission !== 'granted';
+  const calibrated = indoor.groundRef;
+  const ageMin = calibrated ? Math.max(0, Math.round((now - calibrated.at) / 60_000)) : null;
+
+  if (!here) return null;
+  return (
+    <View style={s.here} accessibilityLiveRegion="polite">
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={s.hereDot} />
+        <View style={{ flex: 1 }}>
+          <Text style={s.hereLabel}>You are here</Text>
+          <Text style={s.hereText}>{here.label}</Text>
+        </View>
+      </View>
+      {needsMotion ? (
+        <Button
+          title={indoor.motionPermission === 'denied' ? 'Allow Motion in Settings for floors' : 'Turn on floor detection'}
+          variant="outline"
+          onPress={() => (indoor.motionPermission === 'denied' ? Linking.openSettings() : indoor.requestMotion())}
+          style={{ minHeight: 44 }}
+        />
+      ) : indoor.barometerAvailable ? (
+        <View style={s.calRow}>
+          <Text style={[s.small, { flex: 1 }]}>
+            {calibrated
+              ? `Floor reference ${calibrated.source === 'manual' ? 'set by you' : 'taken outdoors'} ${ageMin! < 1 ? 'just now' : `${ageMin} min ago`}`
+              : 'Floors need a ground-level reading. Walk outside once, or tap the button on the ground floor.'}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              indoor.calibrateGround()
+                ? Alert.alert('Ground floor set', 'MiniTag will measure floors from here.')
+                : Alert.alert('No barometer reading yet', 'Wait a second and try again.')
+            }
+            style={({ pressed }) => [s.calButton, pressed && { opacity: 0.7 }]}>
+            <Text style={s.calButtonText}>I’m on the ground floor</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function centreOf(buildings: Building[]): LatLon | null {
+  if (!buildings.length) return null;
+  const cs = buildings.map((b) => polygonCentre(b.footprint));
+  return {
+    latitude: cs.reduce((a, c) => a + c.latitude, 0) / cs.length,
+    longitude: cs.reduce((a, c) => a + c.longitude, 0) / cs.length,
+  };
 }
 
 function useNow(ms = 30_000) {
@@ -153,41 +394,53 @@ function useNow(ms = 30_000) {
 
 const makeStyles = (p: Palette) =>
   StyleSheet.create({
-    mapPlaceholder: {
-      backgroundColor: p.primarySoft,
+    mapPlaceholder: { backgroundColor: p.primarySoft, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+    searchWrap: { position: 'absolute', left: 16, right: 16, gap: 6 },
+    search: {
+      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 32,
-    },
-    mapPill: {
-      position: 'absolute',
-      left: 20,
+      gap: 8,
       backgroundColor: p.surface,
       borderRadius: R.pill,
       paddingHorizontal: 14,
-      paddingVertical: 8,
+      minHeight: 46,
       shadowColor: '#4E1420',
       shadowOpacity: 0.14,
       shadowRadius: 7,
       shadowOffset: { width: 0, height: 4 },
     },
-    mapPillText: { fontFamily: F.bodySemibold, fontSize: 14, color: p.ink },
-    sheet: {
-      marginTop: -28,
+    searchInput: { flex: 1, fontFamily: F.bodyMedium, fontSize: 15, color: p.ink, paddingVertical: 10 },
+    results: {
       backgroundColor: p.surface,
-      borderTopLeftRadius: 30,
-      borderTopRightRadius: 30,
+      borderRadius: 18,
+      paddingHorizontal: 14,
+      shadowColor: '#4E1420',
+      shadowOpacity: 0.14,
+      shadowRadius: 7,
+      shadowOffset: { width: 0, height: 4 },
     },
+    resultRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52 },
+    resultName: { fontFamily: F.bodySemibold, fontSize: 15, color: p.ink },
+    resultSub: { fontFamily: F.body, fontSize: 12, color: p.muted },
+    noResults: { fontFamily: F.body, fontSize: 14, color: p.muted, paddingVertical: 14 },
+    attribution: {
+      position: 'absolute',
+      right: 8,
+      bottom: 34,
+      fontFamily: F.body,
+      fontSize: 10,
+      color: '#3a3a3a',
+      backgroundColor: 'rgba(255,255,255,0.75)',
+      paddingHorizontal: 5,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    sheet: { marginTop: -28, backgroundColor: p.surface, borderTopLeftRadius: 30, borderTopRightRadius: 30 },
     sheetContent: { padding: 20, gap: 12, paddingBottom: 24 },
-    timeChip: {
-      alignSelf: 'flex-start',
-      backgroundColor: p.accent,
-      borderRadius: R.pill,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-    },
-    timeChipText: { fontFamily: F.bodySemibold, fontSize: 12, color: p.onAccent },
-    title: { fontFamily: F.display, fontSize: 32, lineHeight: 35, letterSpacing: -0.8, color: p.ink, marginTop: 6 },
+    sheetTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    chip: { alignSelf: 'flex-start', backgroundColor: p.accent, borderRadius: R.pill, paddingHorizontal: 10, paddingVertical: 4 },
+    chipText: { fontFamily: F.bodySemibold, fontSize: 12, color: p.onAccent },
+    title: { fontFamily: F.display, fontSize: 28, lineHeight: 32, letterSpacing: -0.6, color: p.ink, marginTop: 6 },
     note: {
       fontFamily: F.body,
       fontSize: 13,
@@ -199,14 +452,18 @@ const makeStyles = (p: Palette) =>
       paddingHorizontal: 12,
       overflow: 'hidden',
     },
-    historyRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      gap: 12,
-      paddingVertical: 10,
-      borderTopWidth: 1,
-      borderTopColor: p.divider,
-    },
+    small: { fontFamily: F.body, fontSize: 12, lineHeight: 17, color: p.muted },
+    floorTitle: { fontFamily: F.bodySemibold, fontSize: 13, color: p.muted, marginTop: 4, marginBottom: 2 },
+    roomRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, borderRadius: 12, paddingHorizontal: 8 },
+    roomName: { fontFamily: F.bodyMedium, fontSize: 15, color: p.ink, flex: 1 },
+    historyRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: p.divider },
     historyName: { fontFamily: F.bodyMedium, fontSize: 14, color: p.ink, flex: 1 },
     historyWhen: { fontFamily: F.body, fontSize: 14, color: p.muted },
+    here: { backgroundColor: p.ground, borderRadius: 18, padding: 12, gap: 10, borderWidth: 1, borderColor: p.border },
+    hereDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: p.sage, borderWidth: 2, borderColor: p.sageBg },
+    hereLabel: { fontFamily: F.bodySemibold, fontSize: 11, color: p.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+    hereText: { fontFamily: F.bodySemibold, fontSize: 15, color: p.ink, marginTop: 1 },
+    calRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    calButton: { borderRadius: R.pill, borderWidth: 1, borderColor: p.link, paddingHorizontal: 12, paddingVertical: 8 },
+    calButtonText: { fontFamily: F.bodySemibold, fontSize: 13, color: p.link },
   });

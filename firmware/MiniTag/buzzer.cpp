@@ -11,14 +11,31 @@ namespace {
 mbed::PwmOut *pwm = nullptr;
 mbed::DigitalOut *led = nullptr;
 
+struct Pattern {
+  const uint16_t *steps;  // on, off, on, off... in ms
+  uint8_t count;
+  uint16_t cycleMs;
+};
+
+// FIND: beep 150 ms, gap 100 ms, beep 150 ms, gap 600 ms (1 s cycle).
+const uint16_t kFindSteps[] = {150, 100, 150, 600};
+const Pattern kFind = {kFindSteps, 4, 1000};
+// Left behind: three longer beeps, then a pause (3 s cycle), so it sounds
+// different from FIND and uses less battery.
+const uint16_t kAwaySteps[] = {300, 150, 300, 150, 300, 1800};
+const Pattern kAway = {kAwaySteps, 6, 3000};
+
 bool active = false;
-unsigned long findEndsAt = 0;
+const Pattern *pattern = &kFind;
+unsigned long endsAt = 0;
 unsigned long patternStartedAt = 0;
 
-// Pattern: beep 150 ms, gap 100 ms, beep 150 ms, gap 600 ms (1 s cycle).
-const uint16_t kPattern[] = {150, 100, 150, 600};
-const uint8_t kPatternSteps = sizeof(kPattern) / sizeof(kPattern[0]);
-const uint16_t kCycleMs = 150 + 100 + 150 + 600;
+void start(const Pattern *p, uint16_t seconds) {
+  pattern = p;
+  active = true;
+  patternStartedAt = millis();
+  endsAt = patternStartedAt + (unsigned long)seconds * 1000UL;
+}
 
 void sound(bool on) {
   pwm->write(on ? 0.5f : 0.0f);
@@ -39,9 +56,13 @@ void begin() {
 void startFind(uint16_t seconds) {
   if (seconds == 0) seconds = FIND_DEFAULT_SECONDS;
   if (seconds > FIND_MAX_SECONDS) seconds = FIND_MAX_SECONDS;
-  active = true;
-  patternStartedAt = millis();
-  findEndsAt = patternStartedAt + (unsigned long)seconds * 1000UL;
+  start(&kFind, seconds);
+}
+
+void startAway(uint16_t seconds) {
+  if (seconds == 0) seconds = AWAY_BEEP_SECONDS;
+  if (seconds > FIND_MAX_SECONDS) seconds = FIND_MAX_SECONDS;
+  start(&kAway, seconds);
 }
 
 void stop() {
@@ -57,20 +78,23 @@ void chirp(uint16_t ms) {
 
 bool isActive() { return active; }
 
+bool isAway() { return active && pattern == &kAway; }
+
 bool update() {
   if (!active) return false;
 
   unsigned long now = millis();
-  if ((long)(now - findEndsAt) >= 0) {
+  if ((long)(now - endsAt) >= 0) {
+    bool wasFind = pattern == &kFind;
     stop();
-    return true;
+    return wasFind;
   }
 
   // Even steps of the pattern are "on", odd steps are "off".
-  uint16_t t = (now - patternStartedAt) % kCycleMs;
+  uint16_t t = (now - patternStartedAt) % pattern->cycleMs;
   uint8_t step = 0;
-  while (step < kPatternSteps - 1 && t >= kPattern[step]) {
-    t -= kPattern[step];
+  while (step < pattern->count - 1 && t >= pattern->steps[step]) {
+    t -= pattern->steps[step];
     step++;
   }
   sound(step % 2 == 0);

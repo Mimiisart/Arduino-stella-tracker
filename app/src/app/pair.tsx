@@ -52,7 +52,9 @@ export default function PairScreen() {
 
   // Pairing needs Bluetooth, so start it if Welcome was skipped.
   const { startBluetooth } = tag;
-  useEffect(() => startBluetooth(), [startBluetooth]);
+  useEffect(() => {
+    startBluetooth();
+  }, [startBluetooth]);
 
   // Scan as soon as Bluetooth is ready; stop when leaving the screen.
   useEffect(() => {

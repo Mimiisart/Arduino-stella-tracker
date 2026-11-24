@@ -60,6 +60,12 @@
         {
           "enableRemoteNotifications": false
         }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "MiniTag uses your phone’s air-pressure sensor to work out which floor you are on, so it can say where you left your ID."
+        }
       ]
     ],
     "experiments": {

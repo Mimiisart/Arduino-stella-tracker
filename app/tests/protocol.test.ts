@@ -23,6 +23,7 @@ test('parseStatus decodes the payload captured from the real Stella', () => {
     uwbActive: false,
     batteryValid: true,
     usbPowered: true,
+    awayArmed: false,
     millivolts: 3253,
     firmware: '0.1',
   });
@@ -35,6 +36,13 @@ test('parseStatus reads the buzzer and UWB flags', () => {
   assert.equal(s.batteryValid, false);
 });
 
+test('parseStatus reads the left-behind armed flag (firmware 0.2)', () => {
+  const s = parseStatus(b64([1, 0x10 | 0x04, 0x0a, 0x0b, 0, 2]));
+  assert.equal(s.awayArmed, true);
+  assert.equal(s.buzzing, false);
+  assert.equal(s.firmware, '0.2');
+});
+
 test('parseStatus rejects short payloads', () => {
   assert.throws(() => parseStatus(b64([1, 0])));
 });
@@ -44,6 +52,8 @@ test('encodeCommand builds the text the firmware expects', () => {
   assert.equal(text(encodeCommand('FIND', 20)), 'FIND 20');
   assert.equal(text(encodeCommand('FIND', 999)), 'FIND 120');
   assert.equal(text(encodeCommand('STOP')), 'STOP');
+  assert.equal(text(encodeCommand('ARM')), 'ARM');
+  assert.equal(text(encodeCommand('DISARM')), 'DISARM');
   assert.throws(() => encodeCommand('FIND', 0));
 });
 
@@ -51,6 +61,7 @@ test('parseEvent understands every firmware event', () => {
   const ev = (s: string) => parseEvent(Buffer.from(s).toString('base64'));
   assert.deepEqual(ev('OK FIND 30'), { kind: 'ok', command: 'FIND', arg: '30', raw: 'OK FIND 30' });
   assert.deepEqual(ev('OK STOP'), { kind: 'ok', command: 'STOP', arg: undefined, raw: 'OK STOP' });
+  assert.deepEqual(ev('OK ARM'), { kind: 'ok', command: 'ARM', arg: undefined, raw: 'OK ARM' });
   assert.deepEqual(ev('ERR BAD_ARG'), { kind: 'error', code: 'BAD_ARG', raw: 'ERR BAD_ARG' });
   assert.equal(ev('EVT BUTTON').kind, 'button');
   assert.equal(ev('EVT FIND_TIMEOUT').kind, 'findTimeout');
@@ -61,7 +72,7 @@ test('parseEvent understands every firmware event', () => {
 test('batteryLevel maps voltages to coarse levels', () => {
   const at = (mv: number, usb = false): TagStatus => ({
     protocolVersion: 1, buzzing: false, uwbActive: false,
-    batteryValid: true, usbPowered: usb, millivolts: mv, firmware: '0.1',
+    batteryValid: true, usbPowered: usb, awayArmed: false, millivolts: mv, firmware: '0.1',
   });
   assert.equal(batteryLevel(null), 'unknown');
   assert.equal(batteryLevel(at(3253, true)), 'usb');

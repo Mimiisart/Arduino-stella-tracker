@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { friendlyAuthError, useAuth } from '@/backend/auth-context';
 import { useMiniTag } from '@/ble/minitag-context';
 import { batteryLevel } from '@/ble/protocol';
 import { BATTERY_LABEL, Button, Icon, T, Toggle, type IconName } from '@/components/minitag/ui';
@@ -59,6 +60,8 @@ export default function SettingsScreen() {
         <T variant="display" accessibilityRole="header">
           Settings
         </T>
+
+        <AccountSection />
 
         {/* Tracker */}
         {tag.tracker ? (
@@ -173,6 +176,21 @@ export default function SettingsScreen() {
               </View>
             </View>
           )}
+          {data.prefs.alertsEnabled && (
+            <View style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.rowTitle, { fontSize: 15 }]}>Tracker beeps too</Text>
+                <Text style={[s.rowSub, { marginBottom: 0 }]}>
+                  If it loses your phone for 10 seconds, the tag beeps for 20 seconds so people nearby notice your ID
+                </Text>
+              </View>
+              <Toggle
+                value={data.prefs.tagBeep}
+                label="Tracker beeps when left behind"
+                onChange={(v) => data.setPrefs({ tagBeep: v })}
+              />
+            </View>
+          )}
         </View>
 
         {/* Location */}
@@ -254,6 +272,95 @@ export default function SettingsScreen() {
         <T variant="caption">MiniTag {Constants.expoConfig?.version ?? ''}</T>
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+/** Signed out: create account / sign in. Signed in: name, email, sign out, delete my data. */
+function AccountSection() {
+  const auth = useAuth();
+  const { palette: p } = useAppTheme();
+  const s = useThemedStyles(makeStyles);
+  const [busy, setBusy] = useState(false);
+
+  if (!auth.ready) return null;
+
+  if (!auth.session) {
+    return (
+      <View style={s.section}>
+        <View style={s.sectionBody}>
+          <Text style={s.rowTitle}>Account</Text>
+          <Text style={s.rowSub}>
+            Optional. An account lets other MiniTag users help find your tag. Beeping, alerts and the map work without one.
+          </Text>
+          <View style={{ gap: 8 }}>
+            <Button title="Create account" onPress={() => router.push('/account?mode=signup')} style={{ minHeight: 50 }} />
+            <Button title="I already have an account" variant="outline" onPress={() => router.push('/account?mode=signin')} style={{ minHeight: 48 }} />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  const name = auth.profile?.displayName ?? 'Your account';
+  const confirmSignOut = () =>
+    Alert.alert('Sign out?', 'Your tag keeps working. Sign back in any time.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', onPress: () => auth.signOut().catch(() => {}) },
+    ]);
+  const confirmDelete = () =>
+    Alert.alert(
+      'Delete your account and data?',
+      'This permanently deletes your account, name and email from MiniTag’s server. It can’t be undone. Your tag and settings on this phone stay.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await auth.deleteMyData();
+              Alert.alert('Deleted', 'Your account and data have been deleted.');
+            } catch (e) {
+              Alert.alert('Couldn’t delete', friendlyAuthError(e));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+
+  return (
+    <View style={s.section}>
+      <View style={[s.row, { minHeight: 76 }]}>
+        <View style={s.avatar}>
+          <Text style={s.avatarText}>{name.trim().charAt(0).toUpperCase() || '?'}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.rowTitle} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={[s.rowSub, { marginBottom: 0 }]} numberOfLines={1}>
+            {auth.email}
+          </Text>
+        </View>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={confirmSignOut}
+        style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider, minHeight: 50 }]}>
+        <Text style={[s.rowTitle, { fontSize: 15, color: p.link }]}>Sign out</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint="Permanently deletes your account, name and email"
+        disabled={busy}
+        onPress={confirmDelete}
+        style={[s.row, { borderTopWidth: 1, borderTopColor: p.divider, minHeight: 50, opacity: busy ? 0.5 : 1 }]}>
+        <Text style={[s.rowTitle, { fontSize: 15, color: p.garnet }]}>Delete my data</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -349,6 +456,15 @@ const makeStyles = (p: Palette) =>
       backgroundColor: p.ground,
     },
     segment: { flexDirection: 'row', gap: 8 },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: p.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarText: { fontFamily: F.display, fontSize: 22, color: p.onPrimary },
     chip: {
       flex: 1,
       minHeight: 46,

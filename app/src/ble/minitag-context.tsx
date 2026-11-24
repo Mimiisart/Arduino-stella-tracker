@@ -95,6 +95,8 @@ export function MiniTagProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const forget = useCallback(async () => {
+    // Removing the tracker on purpose must not set off its left-behind beep.
+    if (client.state.connection === 'connected') await client.send('DISARM').catch(() => {});
     await client.forget();
     Storage.removeItemSync(TRACKER_KEY);
     Storage.removeItemSync(LAST_CONNECTED_KEY);
@@ -111,7 +113,9 @@ export function MiniTagProvider({ children }: { children: ReactNode }) {
       rename,
       forget,
       send: (command, seconds) => client.send(command, seconds),
-      startBluetooth: () => client.start(),
+      startBluetooth: () => {
+        client.start();
+      },
     }),
     [state, tracker, storedLastConnected, client, pair, rename, forget],
   );

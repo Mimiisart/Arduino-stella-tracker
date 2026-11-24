@@ -25,7 +25,9 @@ import {
 import { AppState } from 'react-native';
 
 import { useMiniTag } from '@/ble/minitag-context';
-import { placeAt, pushHistory, shouldAlertAt, type LastSeen, type LatLon, type Place, type PlaceKind } from './geo';
+import { useCampus, type CampusPlace } from './campus';
+import { useIndoor } from './indoor-context';
+import { distanceMetres, placeAt, pushHistory, shouldAlertAt, type LastSeen, type LatLon, type Place, type PlaceKind } from './geo';
 
 export type AlertDelay = 30 | 60 | 120;
 export const ALERT_DELAYS: AlertDelay[] = [30, 60, 120];
@@ -34,12 +36,20 @@ export type Prefs = {
   alertsEnabled: boolean;
   alertDelay: AlertDelay; // seconds
   rememberLastSeen: boolean;
+  /** The tracker itself beeps when it is left behind (firmware 0.2+). */
+  tagBeep: boolean;
   snoozedUntil: number | null;
 };
 
 type PendingAlert = { id: string; since: number; fireAt: number; label: string };
 
-const DEFAULT_PREFS: Prefs = { alertsEnabled: true, alertDelay: 60, rememberLastSeen: true, snoozedUntil: null };
+const DEFAULT_PREFS: Prefs = {
+  alertsEnabled: true,
+  alertDelay: 60,
+  rememberLastSeen: true,
+  tagBeep: true,
+  snoozedUntil: null,
+};
 const KEYS = {
   prefs: 'minitag.prefs',
   places: 'minitag.places',
@@ -124,9 +134,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [notificationPermission, setNotificationPermission] = useState<Permission>('undetermined');
 
   // Latest values for async callbacks (updated after each render).
-  const live = useRef({ prefs, places, trackerName: tag.tracker?.name ?? 'MiniTag' });
+  const campus = useCampus();
+  const indoor = useIndoor();
+  const live = useRef({
+    prefs,
+    places,
+    campus: campus.places as CampusPlace[],
+    locateAt: indoor.locateAt,
+    trackerName: tag.tracker?.name ?? 'MiniTag',
+  });
   useEffect(() => {
-    live.current = { prefs, places, trackerName: tag.tracker?.name ?? 'MiniTag' };
+    live.current = { prefs, places, campus: campus.places, locateAt: indoor.locateAt, trackerName: tag.tracker?.name ?? 'MiniTag' };
   });
 
   // ---- persistence ------------------------------------------------------------
@@ -181,6 +199,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const labelFor = useCallback(async (point: LatLon): Promise<{ label: string; placeId: string | null }> => {
     const place = placeAt(point, live.current.places);
     if (place) return { label: place.name, placeId: place.id };
+    // Then campus geodata: building footprint + barometer floor + room.
+    const fix = live.current.locateAt(point, (point as LatLon & { accuracy?: number | null }).accuracy ?? null);
+    if (fix?.building) return { label: fix.label, placeId: null };
+    // Then the school's other campus places: the closest building whose area contains the point.
+    let building: CampusPlace | null = null;
+    let best = Infinity;
+    for (const c of live.current.campus) {
+      const d = distanceMetres(point, c);
+      if (d <= c.radius && d < best) {
+        building = c;
+        best = d;
+      }
+    }
+    if (building) return { label: building.name, placeId: null };
     const addr = await Location.reverseGeocodeAsync(point).catch(() => []);
     const a = addr[0];
     const label = a?.name || a?.street || a?.district || a?.city || 'Unknown place';
@@ -248,6 +280,31 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (tag.connection === 'idle') cancelPending();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tag.connection]);
+
+  // Arm the tracker's own left-behind beep. The tag can't know about snoozes or
+  // safe places, so the app tells it (ARM / DISARM) whenever that changes.
+  // Firmware 0.1 doesn't know these commands; the error is ignored.
+  const { send } = tag;
+  const armedSent = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (tag.connection !== 'connected') {
+      armedSent.current = null; // re-send after every reconnect
+      return;
+    }
+    const sync = () => {
+      const snoozed = prefs.snoozedUntil !== null && Date.now() < prefs.snoozedUntil;
+      const want = prefs.alertsEnabled && prefs.tagBeep && !snoozed && shouldAlertAt(history[0] ?? null, places);
+      if (armedSent.current === want) return;
+      armedSent.current = want;
+      send(want ? 'ARM' : 'DISARM').catch(() => {});
+    };
+    sync();
+    // Re-arm when a snooze runs out.
+    const until = prefs.snoozedUntil;
+    if (until === null || until <= Date.now()) return;
+    const t = setTimeout(sync, until - Date.now() + 1_000);
+    return () => clearTimeout(t);
+  }, [tag.connection, prefs, history, places, send]);
 
   // Keep the last-seen point fresh while connected and the app is open.
   useEffect(() => {

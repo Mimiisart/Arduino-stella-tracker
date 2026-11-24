@@ -131,10 +131,32 @@ create policy "campus_places: admins write" on public.campus_places
 
 
 -- -----------------------------------------------------------------------------
--- 4. Automatic clean-up: delete sightings older than 7 days, every night at 03:00
+-- 4. Table access for the app (least privilege)
+--    The project does NOT grant API access to new tables automatically, so each
+--    table gets only the operations the app needs. Row Level Security above
+--    still decides which ROWS those operations may touch.
+--    (anon = not signed in, authenticated = signed in)
+-- -----------------------------------------------------------------------------
+grant usage on schema public to anon, authenticated;
+
+grant select, insert, update on public.profiles to authenticated;  -- own row only (RLS)
+grant insert on public.sightings to authenticated;                 -- report only; reading is via find_sightings()
+grant select on public.campus_places to anon, authenticated;        -- everyone may read the campus map
+grant insert, update, delete on public.campus_places to authenticated;  -- admins only (RLS)
+-- public.admins: no grants at all; managed from the dashboard.
+
+
+-- -----------------------------------------------------------------------------
+-- 5. Automatic clean-up: delete sightings older than 7 days, every night at 03:00
 --    (needs the pg_cron extension: Database > Extensions > pg_cron > enable.
 --     If you skip this, find_sightings still ignores anything older than 7 days.)
 -- -----------------------------------------------------------------------------
 -- create extension if not exists pg_cron;
 -- select cron.schedule('minitag-purge-sightings', '0 3 * * *',
 --   $$ delete from public.sightings where seen_at < now() - interval '7 days' $$);
+
+
+-- -----------------------------------------------------------------------------
+-- 6. Tell the Data API to pick up the new tables and functions right away
+-- -----------------------------------------------------------------------------
+notify pgrst, 'reload schema';

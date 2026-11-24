@@ -24,11 +24,13 @@ export type TagStatus = {
   uwbActive: boolean;
   batteryValid: boolean;
   usbPowered: boolean;
+  /** Firmware 0.2+: the tag will beep by itself if it loses the phone. */
+  awayArmed: boolean;
   millivolts: number;
   firmware: string;
 };
 
-export type Command = 'FIND' | 'STOP' | 'STATUS' | 'BATTERY';
+export type Command = 'FIND' | 'STOP' | 'STATUS' | 'BATTERY' | 'ARM' | 'DISARM';
 
 export type TagEvent =
   | { kind: 'ok'; command: string; arg?: string; raw: string }
@@ -51,6 +53,7 @@ export function parseStatus(base64: string): TagStatus {
     uwbActive: (flags & 0x02) !== 0,
     batteryValid: (flags & 0x04) !== 0,
     usbPowered: (flags & 0x08) !== 0,
+    awayArmed: (flags & 0x10) !== 0,
     millivolts: b.readUInt16LE(2),
     firmware: `${b.readUInt8(4)}.${b.readUInt8(5)}`,
   };

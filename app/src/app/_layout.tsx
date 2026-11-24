@@ -6,8 +6,11 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo } from 'react';
 
+import { AuthProvider } from '@/backend/auth-context';
 import { MiniTagProvider } from '@/ble/minitag-context';
 import { AppDataProvider } from '@/features/app-data';
+import { CampusProvider } from '@/features/campus';
+import { IndoorProvider } from '@/features/indoor-context';
 import { AppThemeProvider, usePalette } from '@/theme/theme-context';
 
 SplashScreen.preventAutoHideAsync();
@@ -30,11 +33,17 @@ export default function RootLayout() {
 
   return (
     <AppThemeProvider>
-      <MiniTagProvider>
-        <AppDataProvider>
-          <ThemedStack />
-        </AppDataProvider>
-      </MiniTagProvider>
+      <AuthProvider>
+        <MiniTagProvider>
+          <CampusProvider>
+            <IndoorProvider>
+              <AppDataProvider>
+                <ThemedStack />
+              </AppDataProvider>
+            </IndoorProvider>
+          </CampusProvider>
+        </MiniTagProvider>
+      </AuthProvider>
     </AppThemeProvider>
   );
 }
@@ -61,6 +70,8 @@ function ThemedStack() {
         <Stack.Screen name="alert" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
         <Stack.Screen name="add-place" options={{ presentation: 'modal' }} />
         <Stack.Screen name="battery" />
+        <Stack.Screen name="account" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="add-room" options={{ presentation: 'modal' }} />
       </Stack>
     </ThemeProvider>
   );
