@@ -29,8 +29,8 @@ import { useCampus, type CampusPlace } from './campus';
 import { useIndoor } from './indoor-context';
 import { distanceMetres, placeAt, pushHistory, shouldAlertAt, type LastSeen, type LatLon, type Place, type PlaceKind } from './geo';
 
-export type AlertDelay = 30 | 60 | 120;
-export const ALERT_DELAYS: AlertDelay[] = [30, 60, 120];
+export type AlertDelay = 5 | 10 | 30 | 60 | 120;
+export const ALERT_DELAYS: AlertDelay[] = [5, 10, 30, 60, 120];
 
 export type Prefs = {
   alertsEnabled: boolean;
@@ -141,10 +141,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     places,
     campus: campus.places as CampusPlace[],
     locateAt: indoor.locateAt,
-    trackerName: tag.tracker?.name ?? 'MiniTag',
+    trackerName: tag.tracker?.name ?? 'MiTag',
   });
   useEffect(() => {
-    live.current = { prefs, places, campus: campus.places, locateAt: indoor.locateAt, trackerName: tag.tracker?.name ?? 'MiniTag' };
+    live.current = { prefs, places, campus: campus.places, locateAt: indoor.locateAt, trackerName: tag.tracker?.name ?? 'MiTag' };
   });
 
   // ---- persistence ------------------------------------------------------------
@@ -248,7 +248,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: `${trackerName} left behind?`,
-        body: `You may have left your ${trackerName} behind${label !== 'Unknown place' ? ` at ${label}` : ''}. MiniTag is no longer connected.`,
+        body: `You may have left your ${trackerName} behind${label !== 'Unknown place' ? ` at ${label}` : ''}. MiTag is no longer connected.`,
         data: { kind: 'left-behind' },
         sound: true,
       },
@@ -318,7 +318,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   // Tick so a pending alert turns into an active one on screen.
   useEffect(() => {
     if (!pending) return;
-    const t = setInterval(() => setNow(Date.now()), 5_000);
+    const t = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(t);
   }, [pending]);
 
