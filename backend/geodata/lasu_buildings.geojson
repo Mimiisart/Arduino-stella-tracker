@@ -15674,7 +15674,7 @@
     "osm_id": "way/1570330627",
     "name": null,
     "category": "Building",
-    "levels": 0,
+    "levels": null,
     "area_m2": 5594
    },
    "geometry": {

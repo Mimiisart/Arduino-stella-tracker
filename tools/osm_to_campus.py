@@ -121,7 +121,8 @@ for e in elements:
             'osm_id': f'{e["type"]}/{e["id"]}',
             'name': tags.get('name'),
             'category': category(tags),
-            'levels': int(levels) if levels and levels.isdigit() else None,
+            # OSM sometimes says 0 floors; treat anything below 1 as unknown.
+            'levels': int(levels) if levels and levels.isdigit() and int(levels) >= 1 else None,
             'area_m2': round(area_m2(outer)),
         },
         'geometry': {'type': 'Polygon', 'coordinates': [[[round(x, 7), round(y, 7)] for x, y in outer]]},
