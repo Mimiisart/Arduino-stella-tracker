@@ -120,9 +120,18 @@ export default function SettingsScreen() {
         <Section
           header="Leave-behind alerts"
           footer={
-            data.prefs.alertsEnabled && data.prefs.tagBeep
-              ? 'If the tracker loses your phone for 10 seconds, it also beeps for 20 seconds so people nearby notice your ID.'
-              : 'Warns you if you walk away from your ID.'
+            !data.prefs.alertsEnabled
+              ? 'Warns you if you walk away from your ID.'
+              : [
+                  data.prefs.phoneBuzz
+                    ? 'Your phone plays a loud alarm and vibrates three times, 10 seconds apart, and keeps vibrating while MiTag is open. The alarm follows your ringer volume; on silent it only vibrates.'
+                    : 'Your phone shows one notification.',
+                  data.prefs.tagBeep
+                    ? 'If the tracker loses your phone for 10 seconds, it also beeps for 20 seconds so people nearby notice your ID.'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')
           }>
           <Row
             title="Alerts"
@@ -151,6 +160,18 @@ export default function SettingsScreen() {
               subtitle={`Snoozed until ${new Date(data.prefs.snoozedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
               tinted
               onPress={() => data.setPrefs({ snoozedUntil: null })}
+            />
+          )}
+          {data.prefs.alertsEnabled && (
+            <Row
+              title="Phone Beeps and Vibrates"
+              right={
+                <Toggle
+                  value={data.prefs.phoneBuzz}
+                  label="Phone keeps beeping and vibrating when left behind"
+                  onChange={(v) => data.setPrefs({ phoneBuzz: v })}
+                />
+              }
             />
           )}
           {data.prefs.alertsEnabled && (

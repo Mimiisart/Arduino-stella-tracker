@@ -22,7 +22,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Vibration } from 'react-native';
 
 import { useMiniTag } from '@/ble/minitag-context';
 import { useCampus, type CampusPlace } from './campus';
@@ -38,16 +38,19 @@ export type Prefs = {
   rememberLastSeen: boolean;
   /** The tracker itself beeps when it is left behind (firmware 0.2+). */
   tagBeep: boolean;
+  /** The phone itself keeps beeping and vibrating, not just one notification. */
+  phoneBuzz: boolean;
   snoozedUntil: number | null;
 };
 
-type PendingAlert = { id: string; since: number; fireAt: number; label: string };
+type PendingAlert = { ids: string[]; since: number; fireAt: number; label: string };
 
 const DEFAULT_PREFS: Prefs = {
   alertsEnabled: true,
   alertDelay: 60,
   rememberLastSeen: true,
   tagBeep: true,
+  phoneBuzz: true,
   snoozedUntil: null,
 };
 const KEYS = {
@@ -58,6 +61,13 @@ const KEYS = {
 };
 const LOCATION_REFRESH_MS = 3 * 60_000;
 const SNOOZE_MS = 60 * 60_000;
+/** With phoneBuzz on: the alert repeats this many seconds after it first fires. */
+const REPEAT_AFTER_S = [10, 20];
+/** While MiTag is open: buzz on, buzz off (ms), for at most this long. */
+const VIBRATE_PATTERN = [0, 600, 400];
+const VIBRATE_FOR_MS = 60_000;
+/** Bundled by the expo-notifications plugin (app.json); iOS plays up to 30 s of it. */
+const ALARM_SOUND = 'mitag_alarm.wav';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -126,8 +136,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [places, setPlaces] = useState<Place[]>(() => loadList<Place>(KEYS.places));
   const [history, setHistory] = useState<LastSeen[]>(() => loadList<LastSeen>(KEYS.history));
   const [pending, setPending] = useState<PendingAlert | null>(() => {
-    const p = load<PendingAlert | null>(KEYS.pending, null);
-    return p && p.id ? p : null;
+    const p = load<(PendingAlert & { id?: string }) | null>(KEYS.pending, null);
+    if (p && !p.ids && p.id) return { ...p, ids: [p.id] }; // saved by an older version
+    return p && p.ids?.length ? p : null;
   });
   const [now, setNow] = useState(Date.now);
   const [locationPermission, setLocationPermission] = useState<Permission>('undetermined');
@@ -236,7 +247,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   // ---- alerts ---------------------------------------------------------------------
   const cancelPending = useCallback(() => {
     setPending((p) => {
-      if (p) Notifications.cancelScheduledNotificationAsync(p.id).catch(() => {});
+      p?.ids.forEach((id) => Notifications.cancelScheduledNotificationAsync(id).catch(() => {}));
       return null;
     });
   }, []);
@@ -245,16 +256,35 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const { prefs: pr, trackerName } = live.current;
     if (!pr.alertsEnabled) return;
     if (pr.snoozedUntil && Date.now() < pr.snoozedUntil) return;
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: `${trackerName} left behind?`,
-        body: `You may have left your ${trackerName} behind${label !== 'Unknown place' ? ` at ${label}` : ''}. MiTag is no longer connected.`,
-        data: { kind: 'left-behind' },
-        sound: true,
-      },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: pr.alertDelay },
-    }).catch(() => null);
-    if (id) setPending({ id, since, fireAt: since + pr.alertDelay * 1000, label });
+    const at = label !== 'Unknown place' ? ` at ${label}` : '';
+    // A 10-second loud alarm (assets/sounds) instead of the short default chime.
+    const sound = pr.phoneBuzz ? ALARM_SOUND : true;
+    const schedule = (seconds: number, title: string, body: string, kind: string) =>
+      Notifications.scheduleNotificationAsync({
+        // Time Sensitive gets through Do Not Disturb / Focus, but only once the app is
+        // signed with the time-sensitive entitlement, which needs a paid Apple
+        // developer account. Until then iOS treats it as a normal alert.
+        content: { title, body, data: { kind }, sound, interruptionLevel: 'timeSensitive' },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds },
+      }).catch(() => null);
+    const first = await schedule(
+      pr.alertDelay,
+      `${trackerName} left behind?`,
+      `You may have left your ${trackerName} behind${at}. MiTag is no longer connected.`,
+      'left-behind',
+    );
+    if (!first) return;
+    // Each notification beeps and vibrates the phone once; repeat it a couple of
+    // times so it is hard to miss. All are cancelled when the tag reconnects.
+    const repeats = pr.phoneBuzz
+      ? await Promise.all(
+          REPEAT_AFTER_S.map((s) =>
+            schedule(pr.alertDelay + s, `${trackerName} still not connected`, `Go back for your ${trackerName}${at}.`, 'left-behind-repeat'),
+          ),
+        )
+      : [];
+    const ids = [first, ...repeats.filter((id): id is string => !!id)];
+    setPending({ ids, since, fireAt: since + pr.alertDelay * 1000, label });
   }, []);
 
   // React to connection changes. The connection is an external system (the BLE
@@ -324,12 +354,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   // Opening the app from the notification shows the alert screen.
   useEffect(() => {
+    const kindOf = (n: Notifications.Notification) => n.request.content.data?.kind;
     const open = (n: Notifications.Notification) => {
-      if (n.request.content.data?.kind === 'left-behind') router.push('/alert');
+      if (kindOf(n) === 'left-behind' || kindOf(n) === 'left-behind-repeat') router.push('/alert');
     };
     const received = Notifications.addNotificationReceivedListener((n) => {
       setNow(Date.now());
-      open(n);
+      if (kindOf(n) === 'left-behind') open(n); // the repeats only beep; the screen is already up
     });
     const tapped = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification));
     const last = Notifications.getLastNotificationResponse();
@@ -347,6 +378,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         : null,
     [pending, now, tag.connection],
   );
+
+  // While MiTag is open, keep vibrating until the tag is back, the alert is
+  // dismissed, or a minute passes. (Locked or in the background, the repeated
+  // notifications do the beeping and vibrating.)
+  const buzzing = !!leftBehind && prefs.phoneBuzz;
+  useEffect(() => {
+    if (!buzzing) return;
+    const start = () => AppState.currentState === 'active' && Vibration.vibrate(VIBRATE_PATTERN, true);
+    start();
+    const stopAt = setTimeout(() => Vibration.cancel(), VIBRATE_FOR_MS);
+    const sub = AppState.addEventListener('change', (st) => (st === 'active' ? start() : Vibration.cancel()));
+    return () => {
+      clearTimeout(stopAt);
+      sub.remove();
+      Vibration.cancel();
+    };
+  }, [buzzing]);
 
   // ---- actions ---------------------------------------------------------------------
   const setPrefs = useCallback(
