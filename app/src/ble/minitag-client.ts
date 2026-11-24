@@ -152,7 +152,7 @@ export class MiniTagClient {
           return;
         }
         if (device && (device.localName === DEVICE_NAME || device.name === DEVICE_NAME)) {
-          onFound({ id: device.id, name: device.localName ?? device.name ?? DEVICE_NAME, rssi: device.rssi });
+          onFound({ id: device.id, name: 'MiTag', rssi: device.rssi }); // shown in the scan list; the tag still advertises as DEVICE_NAME
         }
       })
       .catch(() => stop());
@@ -172,7 +172,7 @@ export class MiniTagClient {
     } catch (err) {
       // Keep trying in the background; the caller still learns it failed now.
       this.reconnect();
-      throw toError(err, 'Could not connect to MiniTag.');
+      throw toError(err, 'Could not connect to MiTag.');
     }
   }
 
@@ -248,7 +248,7 @@ export class MiniTagClient {
     this.disconnectSub = null;
     this.waiters.forEach((w) => {
       clearTimeout(w.timer);
-      w.reject(new Error('MiniTag disconnected.'));
+      w.reject(new Error('MiTag disconnected.'));
     });
     this.waiters = [];
   }
@@ -259,7 +259,7 @@ export class MiniTagClient {
   async send(command: Command, seconds?: number): Promise<TagEvent> {
     const id = this.state.deviceId;
     if (!id || this.state.connection !== 'connected') {
-      throw new Error('MiniTag is not connected.');
+      throw new Error('MiTag is not connected.');
     }
 
     const reply = new Promise<TagEvent>((resolve, reject) => {
@@ -269,7 +269,7 @@ export class MiniTagClient {
         reject,
         timer: setTimeout(() => {
           this.waiters = this.waiters.filter((w) => w !== waiter);
-          reject(new Error('MiniTag did not respond.'));
+          reject(new Error('MiTag did not respond.'));
         }, REPLY_TIMEOUT_MS),
       };
       this.waiters.push(waiter);
@@ -286,7 +286,7 @@ export class MiniTagClient {
       // Drop the waiter we just added; its reply will never come.
       const w = this.waiters.pop();
       if (w) clearTimeout(w.timer);
-      throw toError(err, 'Could not send the command to MiniTag.');
+      throw toError(err, 'Could not send the command to MiTag.');
     }
 
     const event = await reply;

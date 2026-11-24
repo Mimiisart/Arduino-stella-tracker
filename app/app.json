@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MiniTag",
+    "name": "MiTag",
     "slug": "minitag",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -44,14 +44,14 @@
           "modes": [
             "central"
           ],
-          "bluetoothAlwaysPermission": "MiniTag uses Bluetooth to connect to your ID-card tracker, make it beep, and warn you if you leave it behind."
+          "bluetoothAlwaysPermission": "MiTag uses Bluetooth to connect to your ID-card tracker, make it beep, and warn you if you leave it behind."
         }
       ],
       "expo-sqlite",
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "MiniTag saves where your phone was when your ID tag disconnects, so you can see where you last had it."
+          "locationWhenInUsePermission": "MiTag saves where your phone was when your ID tag disconnects, so you can see where you last had it."
         }
       ],
       "expo-maps",
@@ -64,7 +64,7 @@
       [
         "expo-sensors",
         {
-          "motionPermission": "MiniTag uses your phone’s air-pressure sensor to work out which floor you are on, so it can say where you left your ID."
+          "motionPermission": "MiTag uses your phone’s air-pressure sensor to work out which floor you are on, so it can say where you left your ID."
         }
       ]
     ],
